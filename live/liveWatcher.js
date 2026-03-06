@@ -3,6 +3,7 @@ const axios = require("axios");
 const { startCollector, stopCollector } = require("../chat/collector");
 const { startSocket, stopSocket } = require("../socket/socketClient");
 const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
+const sendChat = require("../chat/sendChat");
 const streamStore = require("../store/streamStore");
 
 const channelState = {};
@@ -55,14 +56,14 @@ async function checkChannel(channelId) {
   if (live && !prev) {
 
     console.log(`🔴 방송 시작: ${channelId}`);
-
+  
     streamStore.set(channelId, stream);
     channelState[channelId] = true;
 
-    startCollector(channelId, ownerNickname);
+    await startCollector(channelId, ownerNickname);
     startSocket(channelId);
     startViewerWatcher(channelId);
-
+    await sendChat(channelId, "✨ HARIBO AI 출근했습니다. 🧸");
   }
 
   // 방송 종료

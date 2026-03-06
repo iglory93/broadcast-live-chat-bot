@@ -1,6 +1,6 @@
 const { startConsumer } = require("./chat/consumer");
 const { startLiveWatcher } = require("./live/liveWatcher");
-const firebaseService = require("./service/firebaseService");
+const firebaseService = require("./service/firebaseService.js");
 const config = require("./config/config");
 
 require("./api/server");

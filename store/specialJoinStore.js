@@ -1,5 +1,5 @@
 const db = require("../firebase");
-const { getJoinMessage } = require("../service/firebaseService");
+const { getJoinMessage } = require("../service/firebaseService.js");
 
 /* 입장 메시지 조회 (캐시 사용) */
 function get(channelId, userId) {

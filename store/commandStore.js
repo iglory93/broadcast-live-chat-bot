@@ -1,5 +1,5 @@
 const db = require("../firebase");
-const { getCommand, getCommandCache } = require("../service/firebaseService");
+const { getCommand, getCommandCache } = require("../service/firebaseService.js");
 
 /* 명령어 조회 (캐시 사용) */
 function findCommand(channelId, name) {
