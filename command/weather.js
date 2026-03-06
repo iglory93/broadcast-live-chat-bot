@@ -74,7 +74,13 @@ async function getWeather(city = "서울") {
     const url =
       `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,weather_code`;
 
-    const res = await fetch(url);
+   // const res = await fetch(url);
+
+    const res = await fetch(url, {
+        headers: {
+          "User-Agent": "ttinglive-weather-bot"
+        }
+    });
     const data = await res.json();
 
     const temp = data?.current?.temperature_2m;
