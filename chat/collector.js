@@ -16,12 +16,14 @@ async function getCookie() {
   }
 
   console.log("로그인 시작...");
-
+  
   const browser = await puppeteer.launch({
     headless: "new",
     args: [
       "--no-sandbox",
-      "--disable-setuid-sandbox"
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+      "--disable-gpu"
     ]
   });
 

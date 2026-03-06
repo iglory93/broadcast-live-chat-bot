@@ -19,9 +19,11 @@ app.post("/command", (req, res) => {
 });
 
 app.get("/health", (req,res)=>{
-  res.send({status:"ok"})
-})
+  res.send({status:"ok"});
+});
 
-app.listen(4001, () => {
-  console.log("command api started :4001");
+const PORT = process.env.PORT || 4001;
+
+app.listen(PORT, () => {
+  console.log("command api started :", PORT);
 });
