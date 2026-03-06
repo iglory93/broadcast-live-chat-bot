@@ -16,7 +16,6 @@ const cityMap = {
   경주: { lat: 35.8562, lon: 129.2247 }
 };
 
-
 /* 날씨 코드 해석 */
 function parseWeather(code) {
 
@@ -33,11 +32,9 @@ function parseWeather(code) {
   return "🌤 날씨";
 }
 
-
 /* 도시 → 좌표 */
 async function getCoords(city) {
 
-  // 한국 도시 먼저 체크
   if (cityMap[city]) {
     return {
       name: city,
@@ -46,16 +43,13 @@ async function getCoords(city) {
     };
   }
 
-  // 전세계 검색
   const url =
     `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1`;
 
   const res = await fetch(url);
   const data = await res.json();
 
-  if (!data.results || data.results.length === 0) {
-    return null;
-  }
+  if (!data.results || data.results.length === 0) return null;
 
   const r = data.results[0];
 
@@ -65,7 +59,6 @@ async function getCoords(city) {
     lon: r.longitude
   };
 }
-
 
 /* 날씨 */
 async function getWeather(city = "서울") {
@@ -79,13 +72,18 @@ async function getWeather(city = "서울") {
     }
 
     const url =
-      `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true`;
+      `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current=temperature_2m,weather_code`;
 
     const res = await fetch(url);
     const data = await res.json();
 
-    const temp = data?.current_weather?.temperature;
-    const code = data?.current_weather?.weathercode;
+    const temp = data?.current?.temperature_2m;
+    const code = data?.current?.weather_code;
+
+    if (temp === undefined) {
+      console.log("weather raw:", data);
+      return "🌤 날씨 데이터를 가져오지 못했습니다.";
+    }
 
     const weather = parseWeather(code);
 
