@@ -1,5 +1,5 @@
 const db = require("../firebase");
-const { getCommand } = require("../service/firebaseService");
+const { getCommand, getCommandCache } = require("../service/firebaseService");
 
 /* 명령어 조회 (캐시 사용) */
 function findCommand(channelId, name) {
@@ -95,8 +95,22 @@ async function listCommands(channelId) {
 
 }
 
+/* 전체 명령어 조회 (AI 컨텍스트용) */
+function getAllCommands(channelId) {
+
+  const cache = getCommandCache();
+
+  channelId = String(channelId);
+
+  return {
+    global: cache.global || {},
+    channel: cache[channelId] || {}
+  };
+
+}
 module.exports = {
   findCommand,
+  getAllCommands,
   addGlobal,
   addChannel,
   removeGlobalCommand,

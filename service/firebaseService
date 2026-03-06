@@ -229,17 +229,14 @@ console.log("find:", channelId, key);
 
 }
 
-
+function getCommandCache() {
+  return commandCache;
+}
 /* =========================
    입장 메시지 조회
 ========================= */
 
 function getJoinMessage(channelId, userId) {
-    console.log(joinCache)
-    console.log(channelId)
-    console.log(userId)
-  console.log(joinCache[channelId])
-  console.log(joinCache[channelId][userId])
   
   if (joinCache[channelId] && joinCache[channelId][userId]) {
     return joinCache[channelId][userId];
@@ -275,5 +272,6 @@ module.exports = {
   startFirebaseService,
   getChannels,
   getCommand,
+  getCommandCache,
   getJoinMessage
 };
