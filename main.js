@@ -1,30 +1,3 @@
-// const { startCollector } = require("./chat/collector");
-// const { startConsumer } = require("./chat/consumer");
-// const { startSocket } = require("./socket/socketClient");
-// const config = require("./config/config");
-
-// require("./api/server");
-// const startConsole = require("./console");
-
-
-// async function start(){
-
-//   startConsumer();
-//   console.log('config : '+JSON.stringify(config))
-//   //await startCollector(config.channelId);
-//   //startSocket(config.channelId);
-//   console.log('config : ' + JSON.stringify(config));
-
-//   for (const channelId of config.channelIds) {
-//     startCollector(channelId);
-//   }
-
-//   startConsole();
-
-// }
-
-// start();
-
 const { startConsumer } = require("./chat/consumer");
 const { startLiveWatcher } = require("./live/liveWatcher");
 const config = require("./config/config");
@@ -32,16 +5,43 @@ const config = require("./config/config");
 require("./api/server");
 const startConsole = require("./console");
 
-async function start(){
+async function start() {
 
-  startConsumer();
+  try {
 
-  console.log('config : ' + JSON.stringify(config));
+    startConsumer();
 
-  startLiveWatcher(config.channelIds);
+    console.log("config :", JSON.stringify(config));
 
-  startConsole();
+    startLiveWatcher(config.channelIds);
+
+    startConsole();
+
+  } catch (e) {
+
+    console.error("start error:", e);
+
+  }
 
 }
 
 start();
+
+/* Render sleep 방지 */
+setInterval(async () => {
+
+  try {
+    await fetch("https://broadcast-live-chat-bot.onrender.com");
+  } catch (e) {}
+
+}, 300000);
+
+
+/* 프로세스 crash 방지 */
+process.on("uncaughtException", (err) => {
+  console.error("uncaughtException:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("unhandledRejection:", err);
+});
