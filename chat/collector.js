@@ -16,9 +16,19 @@ async function getCookie() {
   }
 
   console.log("로그인 시작...");
-  
+
+  // const browser = await puppeteer.launch({
+  //   headless: "new",
+  //   args: [
+  //     "--no-sandbox",
+  //     "--disable-setuid-sandbox",
+  //     "--disable-dev-shm-usage",
+  //     "--disable-gpu"
+  //   ]
+  // });
   const browser = await puppeteer.launch({
     headless: "new",
+    executablePath: "/opt/render/.cache/puppeteer/chrome/linux-127.0.6533.88/chrome-linux64/chrome",
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
