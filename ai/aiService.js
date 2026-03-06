@@ -3,7 +3,7 @@ const fetch = require("node-fetch");
 const { buildCommandContext } = require("./commandContext");
 const streamStore = require("../store/streamStore");
 const viewerStore = require("../store/viewerStore");
-const chatMemory = require("../store/chatMemory");
+const chatMemory = require("../store/chatMemoryStore");
 
 async function askAI(message, nickname, channelId, userId, type="chat") {
 

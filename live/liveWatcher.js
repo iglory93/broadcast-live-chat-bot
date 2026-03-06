@@ -6,6 +6,7 @@ const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
 const streamStore = require("../store/streamStore");
 
 const channelState = {};
+const watchers = {};
 
 const LIVE_CHECK_INTERVAL = 3000;
 
@@ -25,7 +26,7 @@ async function isLive(channelId) {
       }
     );
 
-    return res.data; // 방송 정보 전체 반환
+    return res.data;
 
   } catch (e) {
 
@@ -41,9 +42,10 @@ async function isLive(channelId) {
 }
 
 /**
- * 채널 하나 상태 체크
+ * 채널 상태 체크
  */
 async function checkChannel(channelId) {
+
   const stream = await isLive(channelId);
   const live = !!stream;
   const prev = channelState[channelId] || false;
@@ -53,7 +55,8 @@ async function checkChannel(channelId) {
   if (live && !prev) {
 
     console.log(`🔴 방송 시작: ${channelId}`);
-    streamStore.set(channelId,stream);
+
+    streamStore.set(channelId, stream);
     channelState[channelId] = true;
 
     startCollector(channelId, ownerNickname);
@@ -66,9 +69,10 @@ async function checkChannel(channelId) {
   if (!live && prev) {
 
     console.log(`⚫ 방송 종료: ${channelId}`);
+
     streamStore.remove(channelId);
     channelState[channelId] = false;
-    
+
     stopCollector(channelId);
     stopSocket(channelId);
     stopViewerWatcher(channelId);
@@ -78,23 +82,25 @@ async function checkChannel(channelId) {
 }
 
 /**
- * 라이브 감시 시작
+ * 채널 감시 시작 (단일 채널)
  */
-function startLiveWatcher(channelIds) {
+function startLiveWatcher(channelId) {
 
-  console.log("liveWatcher 시작");
+  if (watchers[channelId]) {
+    return;
+  }
 
-  setInterval(async () => {
+  console.log("liveWatcher 시작:", channelId);
+
+  watchers[channelId] = setInterval(async () => {
 
     try {
 
-      await Promise.all(
-        channelIds.map(channelId => checkChannel(channelId))
-      );
+      await checkChannel(channelId);
 
     } catch (e) {
 
-      console.error("liveWatcher error:", e.message);
+      console.error(`[${channelId}] liveWatcher error:`, e.message);
 
     }
 

@@ -1,75 +1,66 @@
-const fs = require("fs");
-const path = require("path");
+const db = require("../firebase");
+const { getJoinMessage } = require("../service/firebaseService");
 
-const file = path.join(__dirname, "../config/specialJoin.json");
+/* 입장 메시지 조회 (캐시 사용) */
+function get(channelId, userId) {
 
-let data = {};
-
-function load() {
-
-  if (!fs.existsSync(file)) {
-    data = {};
-    return;
-  }
-
-  try {
-    const raw = fs.readFileSync(file, "utf8");
-    data = JSON.parse(raw);
-  } catch {
-    data = {};
-  }
+  return getJoinMessage(String(channelId), String(userId));
 
 }
 
-function save() {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
-}
+/* 입장 메시지 추가 */
+// async function add(channelId, userId, message) {
 
-function add(channelId, userId, message) {
+//   console.log("add:", channelId, userId, message);
 
-  load(); // 🔥 항상 최신 파일 읽기
+//   await db
+//     .collection("joinMessages")
+//     .doc(String(channelId))
+//     .collection("users")
+//     .doc(String(userId))
+//     .set({
+//       message: message
+//     });
+
+// }
+
+async function add(channelId, userId, message) {
+
+  channelId = String(channelId);
+  userId = String(userId);
 
   console.log("add:", channelId, userId, message);
 
-  if (!data[channelId]) {
-    data[channelId] = {};
-  }
+  const channelRef = db.collection("joinMessages").doc(channelId);
 
-  data[channelId][userId] = message;
+  /* 채널 document 보장 */
+  await channelRef.set(
+    {
+      enabled: true,
+      createdAt: new Date()
+    },
+    { merge: true }
+  );
 
-  save();
+  /* 실제 입장 메시지 */
+  await channelRef
+    .collection("users")
+    .doc(userId)
+    .set({
+      message
+    });
 
 }
 
-function remove(channelId, userId) {
+/* 삭제 */
+async function remove(channelId, userId) {
 
-  load(); // 🔥 최신 데이터
-
-  if (!data[channelId]) return;
-
-  delete data[channelId][userId];
-
-  save();
-
-}
-
-function get(channelId, userId) {
-
-  load(); // 🔥 매번 reload
-
- // console.log("lookup:", channelId, userId, data[channelId]);
-
-  // 1. 채널 우선
-  if (data[channelId] && data[channelId][userId]) {
-    return data[channelId][userId];
-  }
-
-  // 2. 글로벌
-  if (data.global && data.global[userId]) {
-    return data.global[userId];
-  }
-
-  return null;
+  await db
+    .collection("joinMessages")
+    .doc(String(channelId))
+    .collection("users")
+    .doc(String(userId))
+    .delete();
 
 }
 

@@ -1,5 +1,6 @@
 const { startConsumer } = require("./chat/consumer");
 const { startLiveWatcher } = require("./live/liveWatcher");
+const firebaseService = require("./service/firebaseService");
 const config = require("./config/config");
 
 require("./api/server");
@@ -13,7 +14,14 @@ async function start() {
 
     console.log("config :", JSON.stringify(config));
 
-    startLiveWatcher(config.channelIds);
+    /* Firebase 서비스 시작 */
+    await firebaseService.startFirebaseService((channelId) => {
+
+      console.log("채널 자동 연결:", channelId);
+
+      startLiveWatcher(channelId);
+
+    });
 
     startConsole();
 
@@ -26,6 +34,7 @@ async function start() {
 }
 
 start();
+
 
 /* Render sleep 방지 */
 setInterval(async () => {

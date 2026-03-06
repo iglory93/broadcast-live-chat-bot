@@ -1,4 +1,4 @@
-const commandStore = require("../command/commandStore");
+const commandStore = require("../store/commandStore");
 
 function buildCommandContext(channelId) {
 

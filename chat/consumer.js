@@ -1,6 +1,6 @@
 const queue = require("./queue");
-const commandService = require("../command/commandService");
-const chatMemory = require("../store/chatMemory");
+const commandService = require("../service/commandService");
+const chatMemory = require("../store/chatMemoryStore");
 
 function startConsumer() {
 
