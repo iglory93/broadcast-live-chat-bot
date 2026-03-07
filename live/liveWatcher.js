@@ -10,8 +10,11 @@ const auth = require("../chat/auth");
 /* 채널 상태 */
 const channelState = {};
 
-/* watcher 목록 */
-const runningChannels = new Set();
+/* 감시 채널 목록 */
+const channels = new Set();
+
+/* 큐 인덱스 */
+let index = 0;
 
 /**
  * 방송 상태 확인
@@ -65,8 +68,7 @@ async function checkChannel(channelId) {
 
   const stream = await isLive(channelId);
 
-  if (stream === undefined || stream === null) {
-    //console.log("viewer polling skip", channelId);
+  if (stream === undefined) {
     return;
   }
 
@@ -133,11 +135,22 @@ async function checkChannel(channelId) {
 }
 
 /**
- * 채널 watcher 루프
+ * watcher 루프
  */
-async function watcherLoop(channelId) {
+async function watcherLoop() {
 
-  if (!runningChannels.has(channelId)) return;
+  const list = [...channels];
+
+  if (list.length === 0) {
+
+    setTimeout(watcherLoop, 2000);
+    return;
+
+  }
+
+  const channelId = list[index % list.length];
+
+  index++;
 
   try {
 
@@ -149,7 +162,7 @@ async function watcherLoop(channelId) {
 
   }
 
-  setTimeout(() => watcherLoop(channelId), 2000);
+  setTimeout(watcherLoop, 1000);
 
 }
 
@@ -160,15 +173,13 @@ function startLiveWatcher(channelId) {
 
   channelId = String(channelId);
 
-  if (runningChannels.has(channelId)) {
+  if (channels.has(channelId)) {
     return;
   }
 
-  console.log("liveWatcher 시작:", channelId);
+  console.log("liveWatcher 등록:", channelId);
 
-  runningChannels.add(channelId);
-
-  watcherLoop(channelId);
+  channels.add(channelId);
 
 }
 
@@ -179,15 +190,20 @@ function stopLiveWatcher(channelId) {
 
   channelId = String(channelId);
 
-  if (!runningChannels.has(channelId)) return;
+  if (!channels.has(channelId)) {
+    return;
+  }
 
-  console.log("liveWatcher 종료:", channelId);
+  console.log("liveWatcher 제거:", channelId);
 
-  runningChannels.delete(channelId);
+  channels.delete(channelId);
 
   delete channelState[channelId];
 
 }
+
+/* watcher 시작 */
+watcherLoop();
 
 module.exports = {
   startLiveWatcher,
