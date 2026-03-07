@@ -168,7 +168,7 @@ async function isLive(channelId) {
 async function checkChannel(channelId) {
 
   const stream = await isLive(channelId);
-
+  console.log(JSON.stringify(stream))
   // API 실패시 skip
   if (stream === undefined) {
     console.log(`[${channelId}] live check skip`);
