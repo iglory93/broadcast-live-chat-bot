@@ -2,16 +2,25 @@ const axios = require("axios");
 const sendChat = require("../chat/sendChat");
 const specialJoin = require("../store/specialJoinStore");
 const viewerStore = require("../store/viewerStore");
+const auth = require("../chat/auth");
+const { getCookie } = require("../chat/collector");
+
 const viewersState = {};
 const timers = {};
 
-const POLL_INTERVAL = 2000;     // 조회 주기
-const LEAVE_TIMEOUT = 3000;    // 퇴장 확정 시간
+const POLL_INTERVAL = 3000;
+const LEAVE_TIMEOUT = 4000;
 
 /**
  * 시청자 목록 조회
  */
 async function fetchViewers(channelId) {
+
+  let cookie = auth.getCookie();
+
+  if (!cookie) {
+    cookie = await getCookie();
+  }
 
   let offset = 0;
   const limit = 20;
@@ -20,15 +29,26 @@ async function fetchViewers(channelId) {
   while (true) {
 
     const res = await axios.get(
-      `https://api.ttinglive.com/api/channels/${channelId}/stream/players?offset=${offset}&limit=${limit}`,
+      `https://api.ttinglive.com/api/channels/${channelId}/stream/players`,
       {
+        params: {
+          offset,
+          limit
+        },
         headers: {
-          "x-site-code": "ttinglive"
-        }
+          "x-site-code": "ttinglive",
+          cookie: cookie,
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          accept: "application/json, text/plain, */*",
+          origin: "https://www.ttinglive.com",
+          referer: "https://www.ttinglive.com/"
+        },
+        timeout: 5000
       }
     );
 
-    const list = res.data.list || [];
+    const list = res.data?.list || [];
 
     viewers.push(...list);
 
@@ -39,6 +59,7 @@ async function fetchViewers(channelId) {
   }
 
   return viewers;
+
 }
 
 /**
@@ -57,14 +78,18 @@ function startViewerWatcher(channelId) {
     try {
 
       const viewers = await fetchViewers(channelId);
+
       viewerStore.set(channelId, viewers);
+
+      console.log("viewer list:", channelId, viewers.length);
+
       const now = Date.now();
       const current = new Set();
 
       for (const v of viewers) {
 
-        const userId = String(v.channelId);
-        const nickname = v.nickname;
+        const userId = String(v.memberId || v.channelId || v.id);
+        const nickname = v.nickname || "unknown";
 
         current.add(userId);
 
@@ -95,9 +120,6 @@ function startViewerWatcher(channelId) {
 
         }
 
-        /**
-         * 다시 감지됨
-         */
         user.lastSeen = now;
 
         /**

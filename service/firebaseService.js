@@ -10,7 +10,7 @@ let joinCache = {};
    채널 감시
 ========================= */
 
-function watchChannels(onNewChannel) {
+async function watchChannels(onNewChannel) {
 
   db.collection("channels").onSnapshot(snapshot => {
 
@@ -93,7 +93,7 @@ function watchChannels(onNewChannel) {
 //   }
 
 // }
-function watchCommands() {
+async function watchCommands() {
 
   console.log("commands realtime start");
 
@@ -256,11 +256,11 @@ function getJoinMessage(channelId, userId) {
 ========================= */
 
 async function startFirebaseService(onNewChannel) {
-
-  watchChannels(onNewChannel);
-
+  console.log('1')
+  await watchChannels(onNewChannel);
+console.log('2')
   await watchCommands();
-
+console.log('3')
   await watchJoinMessages();
 
   console.log("Firebase 서비스 시작");

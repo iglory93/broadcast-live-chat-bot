@@ -304,6 +304,7 @@ function stopCollector(channelId) {
 }
 
 module.exports = {
+  getCookie,
   startCollector,
   stopCollector
 };

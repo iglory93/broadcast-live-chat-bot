@@ -1,41 +1,17 @@
 const axios = require("axios");
 
-const { startCollector, stopCollector } = require("../chat/collector");
+const { startCollector, stopCollector, getCookie } = require("../chat/collector");
 const { startSocket, stopSocket } = require("../socket/socketClient");
 const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
 const sendChat = require("../chat/sendChat");
 const streamStore = require("../store/streamStore");
-const { getChannels } = require("../service/firebaseService");
+const auth = require("../chat/auth");
 
-/* 감시 채널 목록 */
-let channels = [];
-
-/* 채널 방송 상태 */
+/* 채널 상태 */
 const channelState = {};
 
-/* 큐 인덱스 */
-let index = 0;
-
-/* watcher 상태 */
-let running = false;
-
-/**
- * 채널 목록 동기화
- */
-function syncChannels() {
-
-  const list = getChannels();
-
-  if (!list || list.length === 0) {
-    channels = [];
-    return;
-  }
-
-  channels = list.map(String);
-
-  console.log("syncChannels:", channels);
-
-}
+/* watcher 목록 */
+const runningChannels = new Set();
 
 /**
  * 방송 상태 확인
@@ -44,11 +20,23 @@ async function isLive(channelId) {
 
   try {
 
+    let cookie = auth.getCookie();
+
+    if (!cookie) {
+      cookie = await getCookie();
+    }
+
     const res = await axios.get(
       `https://api.ttinglive.com/api/channels/${channelId}/stream?option=all`,
       {
         headers: {
-          "x-site-code": "ttinglive"
+          "x-site-code": "ttinglive",
+          cookie: cookie,
+          "user-agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          accept: "application/json, text/plain, */*",
+          origin: "https://www.ttinglive.com",
+          referer: "https://www.ttinglive.com/"
         },
         timeout: 5000
       }
@@ -58,12 +46,11 @@ async function isLive(channelId) {
 
   } catch (e) {
 
-    /* 방송 안하는 경우 */
     if (e.response && e.response.status === 400) {
       return null;
     }
 
-    console.error(`[${channelId}] live check error:`, e.message);
+    console.log(`[${channelId}] isLive error:`, e.message);
 
     return undefined;
 
@@ -78,8 +65,8 @@ async function checkChannel(channelId) {
 
   const stream = await isLive(channelId);
 
-  /* API 오류 skip */
-  if (stream === undefined) {
+  if (stream === undefined || stream === null) {
+    //console.log("viewer polling skip", channelId);
     return;
   }
 
@@ -87,7 +74,9 @@ async function checkChannel(channelId) {
   const prev = channelState[channelId] || false;
   const ownerNickname = stream?.owner?.nickname;
 
-  /* 방송 시작 */
+  /**
+   * 방송 시작
+   */
   if (live && !prev) {
 
     console.log(`🔴 방송 시작: ${channelId}`);
@@ -99,7 +88,9 @@ async function checkChannel(channelId) {
     try {
 
       await startCollector(channelId, ownerNickname);
+
       startSocket(channelId);
+
       startViewerWatcher(channelId);
 
       await sendChat(channelId, "✨ HARIBO AI 출근했습니다. 🧸");
@@ -112,7 +103,9 @@ async function checkChannel(channelId) {
 
   }
 
-  /* 방송 종료 */
+  /**
+   * 방송 종료
+   */
   if (!live && prev) {
 
     console.log(`⚫ 방송 종료: ${channelId}`);
@@ -124,7 +117,9 @@ async function checkChannel(channelId) {
     try {
 
       stopCollector(channelId);
+
       stopSocket(channelId);
+
       stopViewerWatcher(channelId);
 
     } catch (e) {
@@ -138,66 +133,59 @@ async function checkChannel(channelId) {
 }
 
 /**
- * 큐 방식 watcher
+ * 채널 watcher 루프
  */
-async function watcherLoop() {
+async function watcherLoop(channelId) {
 
-  if (!running) return;
+  if (!runningChannels.has(channelId)) return;
 
   try {
 
-    if (channels.length > 0) {
-
-      const channelId = channels[index];
-
-      await checkChannel(channelId);
-
-      index++;
-
-      if (index >= channels.length) {
-        index = 0;
-      }
-
-    }
+    await checkChannel(channelId);
 
   } catch (e) {
 
-    console.error("watcherLoop error:", e);
+    console.log(`[${channelId}] watcherLoop error:`, e.message);
 
   }
 
-  setTimeout(watcherLoop, 2000);
+  setTimeout(() => watcherLoop(channelId), 2000);
 
 }
 
 /**
  * watcher 시작
  */
-async function startLiveWatcher() {
+function startLiveWatcher(channelId) {
 
-  if (running) return;
+  channelId = String(channelId);
 
-  console.log("liveWatcher 시작");
+  if (runningChannels.has(channelId)) {
+    return;
+  }
 
-  running = true;
+  console.log("liveWatcher 시작:", channelId);
 
-  syncChannels();
+  runningChannels.add(channelId);
 
-  /* 채널 목록 1분마다 동기화 */
-  setInterval(syncChannels, 60000);
-
-  watcherLoop();
+  watcherLoop(channelId);
 
 }
 
 /**
- * watcher 중지
+ * watcher 종료
  */
-function stopLiveWatcher() {
+function stopLiveWatcher(channelId) {
 
-  running = false;
+  channelId = String(channelId);
 
-  console.log("liveWatcher 중지");
+  if (!runningChannels.has(channelId)) return;
+
+  console.log("liveWatcher 종료:", channelId);
+
+  runningChannels.delete(channelId);
+
+  delete channelState[channelId];
 
 }
 
