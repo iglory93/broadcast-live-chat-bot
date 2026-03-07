@@ -5,6 +5,7 @@ const { startSocket, stopSocket } = require("../socket/socketClient");
 const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
 const sendChat = require("../chat/sendChat");
 const streamStore = require("../store/streamStore");
+const { getChannels } = require("../service/firebaseService");
 
 /* 감시 채널 목록 */
 let channels = [];
@@ -20,29 +21,19 @@ let running = false;
 
 /**
  * 채널 목록 동기화
- * 실제로는 DB / Firebase에서 가져오면 됩니다.
  */
-async function syncChannels() {
+function syncChannels() {
 
-  try {
+  const list = getChannels();
 
-    // 예시
-    // const list = await db.getChannels()
-
-    const list = [
-      "2022",
-      "447761"
-    ];
-
-    channels = list.map(String);
-
-    console.log("watch channels:", channels);
-
-  } catch (e) {
-
-    console.error("syncChannels error:", e);
-
+  if (!list || list.length === 0) {
+    channels = [];
+    return;
   }
+
+  channels = list.map(String);
+
+  console.log("syncChannels:", channels);
 
 }
 
@@ -74,7 +65,6 @@ async function isLive(channelId) {
 
     console.error(`[${channelId}] live check error:`, e.message);
 
-    /* API 오류 */
     return undefined;
 
   }
@@ -152,9 +142,7 @@ async function checkChannel(channelId) {
  */
 async function watcherLoop() {
 
-  if (!running) {
-    return;
-  }
+  if (!running) return;
 
   try {
 
@@ -187,15 +175,13 @@ async function watcherLoop() {
  */
 async function startLiveWatcher() {
 
-  if (running) {
-    return;
-  }
+  if (running) return;
 
   console.log("liveWatcher 시작");
 
   running = true;
 
-  await syncChannels();
+  syncChannels();
 
   /* 채널 목록 1분마다 동기화 */
   setInterval(syncChannels, 60000);
