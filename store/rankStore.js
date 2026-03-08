@@ -3,21 +3,25 @@ const db = require("../firebase");
 const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
 const AI_CHANNEL_ID = "999846";
 
-function getKstNow() {
-  return new Date(Date.now() + 9 * 60 * 60 * 1000);
+function getKstDate(offsetDays = 0) {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  kst.setUTCDate(kst.getUTCDate() + offsetDays);
+  return kst;
 }
 
 function pad(n) {
   return String(n).padStart(2, "0");
 }
 
-function getTodayKey() {
-  const d = getKstNow();
+function getTodayKey(offsetDays = 0) {
+  const d = getKstDate(offsetDays);
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
-function getMonthKey() {
-  const d = getKstNow();
+function getMonthKey(offsetMonths = 0) {
+  const d = getKstDate(0);
+  d.setUTCMonth(d.getUTCMonth() + offsetMonths);
   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
 }
 
@@ -218,9 +222,39 @@ async function addChat(chat) {
   return globalResult;
 }
 
-function getRankRef({ channelId, scope = "channel", period = "daily" }) {
-  const today = getTodayKey();
-  const month = getMonthKey();
+// function getRankRef({ channelId, scope = "channel", period = "daily" }) {
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   if (scope === "global") {
+//     if (period === "daily") {
+//       return rootDoc(`globalDaily_${today}`).collection("users");
+//     }
+//     if (period === "monthly") {
+//       return rootDoc(`globalMonthly_${month}`).collection("users");
+//     }
+//     if (period === "total") {
+//       return rootDoc(`globalTotal`).collection("users");
+//     }
+//   }
+
+//   const cid = toNumber(channelId);
+
+//   if (period === "daily") {
+//     return rootDoc(`channelDaily_${today}_${cid}`).collection("users");
+//   }
+//   if (period === "monthly") {
+//     return rootDoc(`channelMonthly_${month}_${cid}`).collection("users");
+//   }
+//   if (period === "total") {
+//     return rootDoc(`channelTotal_${cid}`).collection("users");
+//   }
+
+//   return rootDoc(`channelDaily_${today}_${cid}`).collection("users");
+// }
+function getRankRef({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
+  const today = dayKey || getTodayKey(0);
+  const month = monthKey || getMonthKey(0);
 
   if (scope === "global") {
     if (period === "daily") {
@@ -249,8 +283,30 @@ function getRankRef({ channelId, scope = "channel", period = "daily" }) {
   return rootDoc(`channelDaily_${today}_${cid}`).collection("users");
 }
 
-async function getRanking({ channelId, scope = "channel", period = "daily", limit = 5 }) {
-  const ref = getRankRef({ channelId, scope, period });
+// async function getRanking({ channelId, scope = "channel", period = "daily", limit = 5 }) {
+//   const ref = getRankRef({ channelId, scope, period });
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(limit)
+//     .get();
+
+//   return snap.docs.map((doc, index) => ({
+//     rank: index + 1,
+//     ...doc.data()
+//   }));
+// }
+
+async function getRanking({
+  channelId,
+  scope = "channel",
+  period = "daily",
+  limit = 5,
+  dayKey,
+  monthKey
+}) {
+  const ref = getRankRef({ channelId, scope, period, dayKey, monthKey });
 
   const snap = await ref
     .orderBy("chatCount", "desc")

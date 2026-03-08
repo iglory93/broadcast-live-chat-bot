@@ -222,35 +222,51 @@ async function handleCommand(chat) {
     }
 
     /* 채팅순위 */
-    else if (command.startsWith("채팅순위")) {
-      const parsed = parseChatRankCommand(command);
+   else if (command.startsWith("채팅순위")) {
+    const parsed = parseChatRankCommand(command);
+
+    let ranking = [];
+    let title = "";
+
+    if (parsed.period === "broadcast" && parsed.scope === "channel") {
       const streamInfo = streamStore.get(channelId);
       const broadcastId = streamInfo?.broadcastId || null;
-      //console.log(broadcastId)
-      const ranking = await rankStore.getBroadcastRanking(broadcastId, 3);
-      // const ranking = await rankStore.getRanking({
-      //   channelId,
-      //   scope: parsed.scope,
-      //   period: parsed.period,
-      //   limit: 10
-      // });
 
-      if (!ranking.length) {
-        await sendChat(channelId, "채팅 순위 정보가 없습니다.");
+      if (!broadcastId) {
+        await sendChat(channelId, "현재 방송 정보를 찾을 수 없습니다.");
         return;
       }
 
-      const title = getChatRankTitle(parsed.scope, parsed.period);
-      const lines = [title];
+      ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
+      title = getChatRankTitle(parsed.scope, parsed.period);
+    } else {
+      console.log(getDateKey(parsed.dayOffset))
+      ranking = await rankStore.getRanking({
+        channelId,
+        scope: parsed.scope,
+        period: parsed.period,
+        limit: 10,
+        dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
+      });
 
-      for (const row of ranking) {
-        const nickname = await profileCache.getNickname(row.userId);
-        lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
-      }
+      title = getChatRankTitle(parsed.scope, parsed.period);
+    }
 
-      await sendChat(channelId, lines.join("\n"));
+    if (!ranking.length) {
+      await sendChat(channelId, "채팅 순위 정보가 없습니다.");
       return;
     }
+
+    const lines = [title];
+
+    for (const row of ranking) {
+      const nickname = await profileCache.getNickname(row.userId);
+      lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
+    }
+
+    await sendChat(channelId, lines.join("\n"));
+    return;
+  }
 
     /* 채팅확인 */
     else if (command.startsWith("채팅확인")) {
@@ -575,29 +591,65 @@ async function handleCommand(chat) {
   }
 }
 
+// function parseChatRankCommand(command) {
+//   const parts = command.split(/\s+/).filter(Boolean);
+
+//   let scope = "channel";
+//   let period = "daily";
+
+//   for (let i = 1; i < parts.length; i += 1) {
+//     const token = parts[i];
+
+//     if (token === "전체") {
+//       scope = "global";
+//     } else if (token === "월") {
+//       period = "monthly";
+//     } else if (token === "누적") {
+//       period = "total";
+//     }
+//   }
+
+//   return { scope, period };
+// }
 function parseChatRankCommand(command) {
   const parts = command.split(/\s+/).filter(Boolean);
 
   let scope = "channel";
-  let period = "daily";
+  let period = "broadcast";
+  let dayOffset = 0;
 
   for (let i = 1; i < parts.length; i += 1) {
     const token = parts[i];
 
     if (token === "전체") {
       scope = "global";
-    } else if (token === "월") {
+    } else if (token === "오늘") {
+      period = "daily";
+      dayOffset = 0;
+    } else if (token === "어제") {
+      period = "daily";
+      dayOffset = -1;
+    } else if (token === "월" || token === "월간") {
       period = "monthly";
     } else if (token === "누적") {
       period = "total";
     }
   }
 
-  return { scope, period };
+  if (scope === "global" && period === "broadcast") {
+    period = "daily";
+    dayOffset = 0;
+  }
+
+  return { scope, period, dayOffset };
 }
 
-function getChatRankTitle(scope, period) {
+function getChatRankTitle(scope, period, dayOffset = 0) {
   const scopeText = scope === "global" ? "전체 방송" : "현재 방송";
+
+  if (period === "broadcast") {
+    return `🏆 현재 방송 채팅 순위`;
+  }
 
   if (period === "monthly") {
     return `🏆 ${scopeText} 월간 채팅 순위`;
@@ -605,6 +657,10 @@ function getChatRankTitle(scope, period) {
 
   if (period === "total") {
     return `🏆 ${scopeText} 누적 채팅 순위`;
+  }
+
+  if (dayOffset === -1) {
+    return `🏆 ${scopeText} 어제 채팅 순위`;
   }
 
   return `🏆 ${scopeText} 오늘 채팅 순위`;
@@ -664,4 +720,15 @@ function normalizeName(name) {
   return name.replace(/[^\p{L}\p{N}]/gu, "");
 }
 
+function getDateKey(offsetDays = 0) {
+  const now = new Date();
+  const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  kst.setUTCDate(kst.getUTCDate() + offsetDays);
+
+  const year = kst.getUTCFullYear();
+  const month = String(kst.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(kst.getUTCDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
 module.exports = { handleCommand };
