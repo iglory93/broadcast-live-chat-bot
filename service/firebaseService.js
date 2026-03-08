@@ -45,57 +45,6 @@ async function watchChannels(onNewChannel) {
 /* =========================
    명령어 캐시
 ========================= */
-
-// async function watchCommands() {
-
-//   console.log("commands preload start");
-
-//   const snap = await db.collection("commands").get();
-//  console.log("commands 문서 수:", snap.size);   // ⭐ 추가
-//   for (const doc of snap.docs) {
-
-//     const channelId = doc.id;
-
-//     const sub = await db
-//       .collection("commands")
-//       .doc(channelId)
-//       .collection("list")
-//       .get();
-
-//     const map = {};
-
-//     sub.forEach(cmd => {
-//       const key = String(cmd.id).trim();
-//       map[key] = cmd.data().response;
-//     });
-
-//     commandCache[channelId] = map;
-
-//     console.log("commands preload:", channelId, map);
-
-//     /* realtime listener */
-
-//     db.collection("commands")
-//       .doc(channelId)
-//       .collection("list")
-//       .onSnapshot(sub => {
-
-//         const map = {};
-
-//         sub.forEach(cmd => {
-//           const key = String(cmd.id).trim();
-//           map[key] = cmd.data().response;
-//         });
-
-//         commandCache[channelId] = map;
-
-//         console.log("commands updated:", channelId, map);
-
-//       });
-
-//   }
-
-// }
 async function watchCommands() {
 
   console.log("commands realtime start");

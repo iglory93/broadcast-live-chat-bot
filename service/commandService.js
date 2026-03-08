@@ -7,6 +7,7 @@ const { askAI } = require("../ai/aiService");
 const rankStore = require("../store/rankStore");
 const profileCache = require("../store/profileCache");
 const streamStore = require("../store/streamStore");
+const attendanceStore = require("../store/attendanceStore");
 
 async function handleCommand(chat) {
   const channelId = String(chat?.channelId);
@@ -125,7 +126,7 @@ async function handleCommand(chat) {
   }
 
   if (!message.startsWith("!") && !message.startsWith("#")) return;
-  
+
   const startStr =  message.substring(0,1).trim();
   const command = message.substring(1).trim();
   console.log("command:", command);
@@ -155,6 +156,129 @@ async function handleCommand(chat) {
         await sendChat(channelId, "❌ 계산 실패");
       }
 
+      return;
+    }
+
+    /* 출석 */
+    else if (command === "출석") {
+      const result = await attendanceStore.manualAttend(chat);
+
+      if (result?.reason === "blocked_user") {
+        await sendChat(channelId, "출석 대상이 아닙니다.");
+        return;
+      }
+
+      if (result?.ok) {
+        await sendChat(
+          channelId,
+          `📅 ${chat.nickname}님 출석 완료! 오늘 ${result.rank}등 / 연속 출석 ${result.streak}일 / 이번달 누적 ${result.monthlyCount}일`
+        );
+      } else if (result?.already) {
+        await sendChat(
+          channelId,
+          `✅ ${chat.nickname}님은 오늘 이미 출석했어요! (오늘 ${result.rank}등 / 연속 ${result.streak}일 / 이번달 누적 ${result.monthlyCount}일)`
+        );
+      } else {
+        await sendChat(channelId, "출석 처리에 실패했습니다.");
+      }
+
+      return;
+    }
+
+    /* 내출석 */
+    else if (command === "내출석") {
+      const userId = String(chat?.clientChannelId || chat?.userId || chat?.memberId || "");
+      const summary = await attendanceStore.getMyAttendanceSummary(channelId, userId);
+
+      if (!summary?.today) {
+        await sendChat(channelId, `${chat.nickname}님은 오늘 아직 출석하지 않았어요.`);
+        return;
+      }
+
+      const rank = summary.today?.rank || "-";
+      const streak = summary.monthly?.streak || 1;
+      const monthlyCount = summary.monthly?.monthlyCount || 1;
+
+      await sendChat(
+        channelId,
+        `📌 ${chat.nickname}님 오늘 출석 ${rank}등 / 연속 출석 ${streak}일 / 이번달 누적 ${monthlyCount}일`
+      );
+      return;
+    }
+
+    /* 출석체크 */
+    else if (command.startsWith("출석체크")) {
+      const targetUserId = command.replace("출석체크", "").trim();
+
+      if (!targetUserId) {
+        await sendChat(channelId, "사용법: !출석체크 유저아이디");
+        return;
+      }
+
+      const info = await attendanceStore.getAttendanceCheckByUserId(channelId, targetUserId);
+
+      if (!info?.today) {
+        await sendChat(channelId, `해당 유저는 오늘 아직 출석하지 않았어요.`);
+        return;
+      }
+
+      const nickname =
+        await profileCache.getNickname(targetUserId) || `유저${targetUserId}`;
+
+      const rank = info.today?.rank || "-";
+      const streak = info.monthly?.streak || 1;
+      const monthlyCount = info.monthly?.monthlyCount || 1;
+
+      await sendChat(
+        channelId,
+        `🔎 ${nickname}님 오늘 출석 ${rank}등 / 연속 출석 ${streak}일 / 이번달 누적 ${monthlyCount}일`
+      );
+      return;
+    }
+
+    /* 출석순위 */
+    else if (command.startsWith("출석순위")) {
+      const ranking = await attendanceStore.getDailyRanking(channelId, 10);
+
+      if (!ranking.length) {
+        await sendChat(channelId, "오늘 출석자가 없습니다.");
+        return;
+      }
+
+      const lines = ["📅 오늘의 출석 순위"];
+
+      for (const row of ranking) {
+        const nickname =
+          await profileCache.getNickname(row.userId) || `유저${row.userId}`;
+        lines.push(`${row.rank}위 ${nickname}`);
+      }
+
+      await sendChat(channelId, lines.join("\n"));
+      return;
+    }
+
+    /* 월출석순위 */
+    else if (command === "월출석순위") {
+      const ranking = await attendanceStore.getMonthlyRanking(channelId, 10);
+
+      if (!ranking.length) {
+        await sendChat(channelId, "이번 달 출석자가 없습니다.");
+        return;
+      }
+
+      const lines = ["🗓 이번달 출석 순위"];
+
+      for (let i = 0; i < ranking.length; i++) {
+        const row = ranking[i];
+        const nickname =
+          await profileCache.getNickname(row.userId) || `유저${row.userId}`;
+
+        lines.push(
+          `${i + 1}위 ${nickname} (${row.monthlyCount}일, 연속 ${row.streak}일)`
+        );
+      }
+
+      await sendChat(channelId, lines.join("\n"));
       return;
     }
 
