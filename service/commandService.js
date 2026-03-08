@@ -124,8 +124,9 @@ async function handleCommand(chat) {
     return;
   }
 
-  if (!message.startsWith("#")) return;
-
+  if (!message.startsWith("!") && !message.startsWith("#")) return;
+  
+  const startStr =  message.substring(0,1).trim();
   const command = message.substring(1).trim();
   console.log("command:", command);
 
@@ -137,7 +138,7 @@ async function handleCommand(chat) {
       const expr = command.replace("계산", "").trim();
 
       if (!expr) {
-        await sendChat(channelId, "사용법: #계산 1+2*3");
+        await sendChat(channelId, `사용법: ${startStr}계산 1+2*3`);
         return;
       }
 
@@ -187,7 +188,7 @@ async function handleCommand(chat) {
         const parsed = Number(parts[1]);
 
         if (!parsed) {
-          await sendChat(channelId, "사용법: #레벨 또는 #레벨 숫자아이디");
+          await sendChat(channelId, `사용법: ${startStr}레벨 또는 ${startStr}레벨 숫자아이디`);
           return;
         }
 
@@ -278,7 +279,7 @@ async function handleCommand(chat) {
         const parsed = Number(parts[1]);
 
         if (!parsed) {
-          await sendChat(channelId, "사용법: #채팅확인 또는 #채팅확인 숫자아이디");
+          await sendChat(channelId, `사용법: ${startStr}채팅확인 또는 ${startStr}채팅확인 숫자아이디`);
           return;
         }
 
@@ -347,7 +348,7 @@ async function handleCommand(chat) {
       const parts = command.split(" ");
 
       if (parts.length < 3) {
-        await sendChat(channelId, "사용법: #궁합 닉1 닉2");
+        await sendChat(channelId, `사용법: ${startStr}궁합 닉1 닉2`);
         return;
       }
 
@@ -399,7 +400,7 @@ async function handleCommand(chat) {
 
       if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
         if (parts.length < 3) {
-          await sendChat(channelId, "사용법: #채널입장 유저아이디 입장멘트");
+          await sendChat(channelId, `사용법: ${startStr}채널입장 유저아이디 입장멘트`);
           return;
         }
 
@@ -421,7 +422,7 @@ async function handleCommand(chat) {
       
       if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
         if (parts.length < 2) {
-          await sendChat(channelId, "사용법: #채널입장삭제 유저아이디");
+          await sendChat(channelId, `사용법: ${startStr}채널입장삭제 유저아이디`);
           return;
         }
 
@@ -442,7 +443,7 @@ async function handleCommand(chat) {
 
       if (master === 999846 || master === 981141) {
         if (parts.length < 3) {
-          await sendChat(channelId, "사용법: #입장 유저아이디 입장멘트");
+          await sendChat(channelId, `사용법: ${startStr}입장 유저아이디 입장멘트`);
           return;
         }
 
@@ -464,7 +465,7 @@ async function handleCommand(chat) {
 
       if (master === 999846 || master === 981141) {
         if (parts.length < 2) {
-          await sendChat(channelId, "사용법: #입장삭제 유저아이디");
+          await sendChat(channelId, `사용법: ${startStr}입장삭제 유저아이디`);
           return;
         }
 
@@ -484,7 +485,7 @@ async function handleCommand(chat) {
       const parts = command.split(" ");
 
       if (parts.length < 3) {
-        await sendChat(channelId, "사용법: #추가 명령어 대답");
+        await sendChat(channelId, `사용법: ${startStr}추가 명령어 대답`);
         return;
       }
 
@@ -504,7 +505,7 @@ async function handleCommand(chat) {
         const parts = command.split(" ");
 
         if (parts.length < 3) {
-          await sendChat(channelId, "사용법: #채널추가 명령어 대답");
+          await sendChat(channelId, `사용법: ${startStr}채널추가 명령어 대답`);
           return;
         }
 
@@ -527,7 +528,7 @@ async function handleCommand(chat) {
 
       if (master === "999846" || master === "981141") {
         if (parts.length < 2) {
-          await sendChat(channelId, "사용법: #삭제 키");
+          await sendChat(channelId, `사용법: ${startStr}삭제 키`);
           return;
         }
 
