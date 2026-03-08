@@ -8,39 +8,41 @@ const profileCache = require("../store/profileCache");
 function startConsumer() {
   console.log("chat consumer 시작");
 
-  setInterval(async () => {
-    while (queue.size() > 0) {
-      const chat = queue.pop();
+  setInterval(() => {
+    let processed = 0;
 
-      console.log(`[${chat.channelId}] ${chat.nickname}: ${chat.message}`);
+    while (queue.size() > 0 && processed < 50) {
+      const chat = queue.pop();
+      if (!chat) break;
+
+      processed++;
 
       if (chat.type === "chat") {
         chatMemory.add(chat.channelId, chat.nickname, chat.message);
 
-        // 메모리 워밍업만 수행 (DB 저장 X)
         if (chat.clientChannelId && chat.nickname) {
           profileCache.warmNickname(chat.clientChannelId, chat.nickname);
         }
 
-        try {
-          //if( chat.channelId != 999846 ) {
-          const levelResult = await rankStore.addChat(chat);
-
-          if (levelResult.levelUp) {
-            await sendChat(
-              chat.channelId,
-              `🎉 ${chat.nickname}님 레벨업! Lv.${levelResult.prevLevel} → Lv.${levelResult.nextLevel}`
-            );
-          }
-          //} 
-        } catch (err) {
-          console.log("rankStore addChat error:", err.message);
-        }
+        rankStore.addChat(chat)
+          .then(levelResult => {
+            if (levelResult?.levelUp) {
+              return sendChat(
+                chat.channelId,
+                `🎉 ${chat.nickname}님 레벨업! Lv.${levelResult.prevLevel} → Lv.${levelResult.nextLevel}`
+              );
+            }
+          })
+          .catch(err => {
+            console.log("rankStore addChat error:", err.message);
+          });
       }
 
-      await commandService.handleCommand(chat);
+      commandService.handleCommand(chat).catch(err => {
+        console.log("commandService error:", err.message);
+      });
     }
-  }, 50);
+  }, 20);
 }
 
 module.exports = { startConsumer };

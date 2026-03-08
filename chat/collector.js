@@ -244,7 +244,7 @@ async function startCollector(channelId, ownerNickname) {
     if (data?.member) {
 
       const clientChannelId = data.member?.channelId;
-
+      const role = data.member?.role?.channel || null;
       let message = data.message;
 
       if (Array.isArray(message)) {
@@ -252,12 +252,13 @@ async function startCollector(channelId, ownerNickname) {
       }
 
       if (!message) return;
-
+      console.log(role)
       queue.push({
         type: "chat",
         channelId,
         clientChannelId,
         nickname: data.member.nickname,
+        role,
         message,
         time: now
       });

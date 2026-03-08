@@ -22,7 +22,9 @@ async function handleCommand(chat) {
     const amountText = amount + "렉스";
     if (productName) {
       productName = productName.replace(amountText, "");
-      productName = `, [${productName}]`;
+      if( productName != "" ){
+        productName = `, [${productName}]`;
+      }
     }
 
     const AI_CHANCE = 0.5;
@@ -375,7 +377,7 @@ async function handleCommand(chat) {
       const parts = command.split(" ");
       const master = Number(chat?.clientChannelId);
 
-      if (master === 999846 || master === 981141 || String(master) === channelId) {
+      if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
         if (parts.length < 3) {
           await sendChat(channelId, "사용법: #채널입장 유저아이디 입장멘트");
           return;
@@ -396,8 +398,8 @@ async function handleCommand(chat) {
     else if (command.startsWith("채널입장삭제 ")) {
       const parts = command.split(" ");
       const master = Number(chat?.clientChannelId);
-
-      if (master === 999846 || master === 981141 || String(master) === channelId) {
+      console.log(chat.role)
+      if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
         if (parts.length < 2) {
           await sendChat(channelId, "사용법: #채널입장삭제 유저아이디");
           return;
@@ -478,7 +480,7 @@ async function handleCommand(chat) {
     else if (command.startsWith("채널추가 ")) {
       const master = String(chat?.clientChannelId);
 
-      if (master === "999846" || master === "981141" || master === channelId) {
+      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
         const parts = command.split(" ");
 
         if (parts.length < 3) {
@@ -525,7 +527,7 @@ async function handleCommand(chat) {
       const parts = command.split(" ");
       const master = String(chat?.clientChannelId);
 
-      if (master === "999846" || master === "981141" || master === channelId) {
+      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
         if (parts.length < 2) {
           await sendChat(channelId, "사용법: #채널삭제 키");
           return;
