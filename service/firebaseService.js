@@ -31,6 +31,7 @@ async function watchChannels(onNewChannel) {
       }
 
     });
+    console.log(ids)
 
     channelCache = ids;
 
