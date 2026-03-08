@@ -81,7 +81,7 @@ function startViewerWatcher(channelId) {
 
       viewerStore.set(channelId, viewers);
 
-      console.log("viewer list:", channelId, viewers.length);
+      //console.log("viewer list:", channelId, viewers.length);
 
       const now = Date.now();
       const current = new Set();

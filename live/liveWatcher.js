@@ -1,7 +1,7 @@
 const axios = require("axios");
 
 const { startCollector, stopCollector, getCookie } = require("../chat/collector");
-const { startSocket, stopSocket } = require("../socket/socketClient");
+// const { startSocket, stopSocket } = require("../socket/socketClient");
 const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
 const sendChat = require("../chat/sendChat");
 const streamStore = require("../store/streamStore");
@@ -91,7 +91,7 @@ async function checkChannel(channelId) {
 
       await startCollector(channelId, ownerNickname);
 
-      startSocket(channelId);
+      // startSocket(channelId);
 
       startViewerWatcher(channelId);
 
@@ -120,7 +120,7 @@ async function checkChannel(channelId) {
 
       stopCollector(channelId);
 
-      stopSocket(channelId);
+      // stopSocket(channelId);
 
       stopViewerWatcher(channelId);
 
