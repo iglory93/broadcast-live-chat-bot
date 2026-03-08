@@ -287,10 +287,10 @@ async function handleCommand(chat) {
       const globalToday = Number(summary.globalDaily?.chatCount || 0);
       const globalMonth = Number(summary.globalMonthly?.chatCount || 0);
       const globalTotal = Number(summary.globalTotal?.chatCount || 0);
-
-      const level = Number(summary.channelTotal?.level || 0);
-      const score = Number(summary.channelTotal?.score || 0);
-      const nextLevelScore = Number(summary.channelTotal?.nextLevelScore || 0);
+      
+      const level = Number(summary.globalTotal?.level || 0);
+      const score = Number(summary.globalTotal?.score || 0);
+      const nextLevelScore = Number(summary.globalTotal?.nextLevelScore || 0);
       const remain = Math.max(0, nextLevelScore - score);
 
       await sendChat(
