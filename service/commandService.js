@@ -6,10 +6,11 @@ const specialJoin = require("../store/specialJoinStore");
 const { askAI } = require("../ai/aiService");
 const rankStore = require("../store/rankStore");
 const profileCache = require("../store/profileCache");
+const streamStore = require("../store/streamStore");
 
 async function handleCommand(chat) {
   const channelId = String(chat?.channelId);
-  console.log("channelId:", channelId);
+  //console.log("channelId:", channelId);
 
   /* 후원 이벤트 */
   if (chat.type === "gift") {
@@ -223,13 +224,16 @@ async function handleCommand(chat) {
     /* 채팅순위 */
     else if (command.startsWith("채팅순위")) {
       const parsed = parseChatRankCommand(command);
-
-      const ranking = await rankStore.getRanking({
-        channelId,
-        scope: parsed.scope,
-        period: parsed.period,
-        limit: 10
-      });
+      const streamInfo = streamStore.get(channelId);
+      const broadcastId = streamInfo?.broadcastId || null;
+      //console.log(broadcastId)
+      const ranking = await rankStore.getBroadcastRanking(broadcastId, 3);
+      // const ranking = await rankStore.getRanking({
+      //   channelId,
+      //   scope: parsed.scope,
+      //   period: parsed.period,
+      //   limit: 10
+      // });
 
       if (!ranking.length) {
         await sendChat(channelId, "채팅 순위 정보가 없습니다.");
@@ -479,7 +483,7 @@ async function handleCommand(chat) {
     /* 채널추가 */
     else if (command.startsWith("채널추가 ")) {
       const master = String(chat?.clientChannelId);
-      console.log( chat.role === "M")
+      //console.log( chat.role === "M")
       if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
         const parts = command.split(" ");
 

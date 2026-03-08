@@ -3,12 +3,22 @@ const db = require("../firebase");
 const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
 const AI_CHANNEL_ID = "999846";
 
+function getKstNow() {
+  return new Date(Date.now() + 9 * 60 * 60 * 1000);
+}
+
+function pad(n) {
+  return String(n).padStart(2, "0");
+}
+
 function getTodayKey() {
-  return new Date().toISOString().slice(0, 10);
+  const d = getKstNow();
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 }
 
 function getMonthKey() {
-  return new Date().toISOString().slice(0, 7);
+  const d = getKstNow();
+  return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
 }
 
 function rootDoc(name) {
@@ -156,6 +166,17 @@ async function addChat(chat) {
     chatCount: 1,
     score
   };
+
+
+  if (chat.broadcastId) {
+    await updateCounterDoc(
+      rootDoc(`broadcast_${chat.broadcastId}`)
+        .collection("users")
+        .doc(String(userId)),
+      payload,
+      false
+    );
+  }
 
   await updateCounterDoc(
     rootDoc(`channelDaily_${today}_${channelId}`).collection("users").doc(String(userId)),
@@ -321,10 +342,25 @@ async function getUserChatSummary(channelId, userId) {
   };
 }
 
+async function getBroadcastRanking(broadcastId, limit = 5) {
+  const snap = await rootDoc(`broadcast_${broadcastId}`)
+    .collection("users")
+    .orderBy("chatCount", "desc")
+    .orderBy("score", "desc")
+    .limit(limit)
+    .get();
+
+  return snap.docs.map((doc, index) => ({
+    rank: index + 1,
+    ...doc.data()
+  }));
+}
+
 module.exports = {
   addChat,
   getRanking,
   getLevelRanking,
   getUserLevel,
-  getUserChatSummary
+  getUserChatSummary,
+  getBroadcastRanking
 };

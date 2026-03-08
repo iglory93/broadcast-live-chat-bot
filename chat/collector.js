@@ -3,6 +3,7 @@ const queue = require("./queue");
 const config = require("../config/config");
 const io = require("socket.io-client");
 const auth = require("./auth");
+const streamStore = require("../store/streamStore");
 
 const sockets = {};
 const announcementCache = new Map();
@@ -250,9 +251,9 @@ async function startCollector(channelId, ownerNickname) {
       if (Array.isArray(message)) {
         message = message.map(m => m?.msg || "").join(" ");
       }
-
+      const streamInfo = streamStore.get(channelId);
       if (!message) return;
-      console.log(role)
+      //console.log(role)
       queue.push({
         type: "chat",
         channelId,
@@ -260,7 +261,9 @@ async function startCollector(channelId, ownerNickname) {
         nickname: data.member.nickname,
         role,
         message,
-        time: now
+        time: now,
+        broadcastId: streamInfo?.broadcastId || null,
+        streamId: streamInfo?.streamId || null
       });
 
     }

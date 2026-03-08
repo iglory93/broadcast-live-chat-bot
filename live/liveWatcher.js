@@ -84,9 +84,17 @@ async function checkChannel(channelId) {
     console.log(`🔴 방송 시작: ${channelId}`);
 
     channelState[channelId] = true;
-
-    streamStore.set(channelId, stream);
-
+    const streamId = stream?.stream?.id;
+    const broadcastId = `${channelId}_${streamId}`;
+    //streamStore.set(channelId, stream);
+    streamStore.set(channelId, {
+      raw: stream,
+      streamId,
+      broadcastId,
+      startedAt: stream?.status?.startedAt || stream?.stream?.createdAt || null,
+      title: stream?.status?.title || stream?.title || "",
+      ownerNickname: stream?.owner?.nickname || ""
+    });
     try {
 
       await startCollector(channelId, ownerNickname);

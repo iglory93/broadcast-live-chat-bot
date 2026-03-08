@@ -16,9 +16,15 @@ function isLive(channelId) {
   return !!streams[channelId];
 }
 
+function getBroadcastId(channelId) {
+  return streams[channelId]?.broadcastId || null;
+}
+
+
 module.exports = {
   set,
   get,
   remove,
-  isLive
+  isLive,
+  getBroadcastId
 };
