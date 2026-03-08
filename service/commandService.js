@@ -398,7 +398,7 @@ async function handleCommand(chat) {
     else if (command.startsWith("채널입장삭제 ")) {
       const parts = command.split(" ");
       const master = Number(chat?.clientChannelId);
-      console.log(chat.role)
+      
       if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
         if (parts.length < 2) {
           await sendChat(channelId, "사용법: #채널입장삭제 유저아이디");
@@ -479,7 +479,7 @@ async function handleCommand(chat) {
     /* 채널추가 */
     else if (command.startsWith("채널추가 ")) {
       const master = String(chat?.clientChannelId);
-
+      console.log( chat.role === "M")
       if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
         const parts = command.split(" ");
 

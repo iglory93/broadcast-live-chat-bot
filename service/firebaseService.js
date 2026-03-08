@@ -16,11 +16,11 @@ async function watchChannels(onNewChannel) {
 
     const ids = [];
 
-    // snapshot.forEach(doc => {
-    //   ids.push(doc.id);
-    // });
+    snapshot.forEach(doc => {
+      ids.push(doc.id);
+    });
 
-    ids.push(2022)
+    //ids.push(2022)
 
     const newChannels = ids.filter(id => !channelCache.includes(id));
 
