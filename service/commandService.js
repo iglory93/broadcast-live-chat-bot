@@ -156,7 +156,8 @@ async function handleCommand(chat) {
 
     /* 레벨 */
     else if (command.startsWith("레벨순위")) {
-      const ranking = await rankStore.getLevelRanking(channelId, 5);
+      //const ranking = await rankStore.getLevelRanking(channelId, 5);
+      const ranking = await rankStore.getLevelRanking(10);
 
       if (!ranking.length) {
         await sendChat(channelId, "레벨 정보가 없습니다.");
@@ -190,7 +191,7 @@ async function handleCommand(chat) {
         targetUserId = parsed;
       }
 
-      const data = await rankStore.getUserLevel(channelId, targetUserId);
+      const data = await rankStore.getUserLevel(targetUserId);
 
       if (!data) {
         await sendChat(channelId, "레벨 정보가 없습니다.");
@@ -225,7 +226,7 @@ async function handleCommand(chat) {
         channelId,
         scope: parsed.scope,
         period: parsed.period,
-        limit: 5
+        limit: 10
       });
 
       if (!ranking.length) {

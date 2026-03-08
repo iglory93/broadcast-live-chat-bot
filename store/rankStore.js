@@ -1,6 +1,7 @@
 const admin = require("firebase-admin");
 const db = require("../firebase");
 const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
+const AI_CHANNEL_ID = "999846";
 
 function getTodayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -67,10 +68,79 @@ async function updateCounterDoc(docRef, payload, saveLevel) {
   };
 }
 
+// async function addChat(chat) {
+//   const channelId = toNumber(chat.channelId);
+//   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
+//   const message = String(chat.message || "").trim();
+
+//   // AI 채널은 랭킹/레벨 제외
+//   if (String(channelId) === AI_CHANNEL_ID) {
+//     return;
+//   }
+
+//   userId = String(userId);
+//   if (!channelId || !userId || !message) {
+//     return { levelUp: false };
+//   }
+
+//   const score = calcScore(message);
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   const payload = {
+//     userId,
+//     channelId,
+//     chatCount: 1,
+//     score
+//   };
+
+//   await updateCounterDoc(
+//     rootDoc(`channelDaily_${today}_${channelId}`).collection("users").doc(String(userId)),
+//     payload,
+//     false
+//   );
+
+//   await updateCounterDoc(
+//     rootDoc(`channelMonthly_${month}_${channelId}`).collection("users").doc(String(userId)),
+//     payload,
+//     false
+//   );
+
+//   const channelTotalResult = await updateCounterDoc(
+//     rootDoc(`channelTotal_${channelId}`).collection("users").doc(String(userId)),
+//     payload,
+//     true
+//   );
+
+//   await updateCounterDoc(
+//     rootDoc(`globalDaily_${today}`).collection("users").doc(String(userId)),
+//     payload,
+//     false
+//   );
+
+//   await updateCounterDoc(
+//     rootDoc(`globalMonthly_${month}`).collection("users").doc(String(userId)),
+//     payload,
+//     false
+//   );
+
+//   await updateCounterDoc(
+//     rootDoc(`globalTotal`).collection("users").doc(String(userId)),
+//     payload,
+//     true
+//   );
+
+//   return channelTotalResult;
+// }
 async function addChat(chat) {
   const channelId = toNumber(chat.channelId);
+  const clientChannelId = toNumber(chat.clientChannelId);
   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
   const message = String(chat.message || "").trim();
+  
+  if (String(clientChannelId) === AI_CHANNEL_ID) {
+    return { levelUp: false };
+  }
 
   if (!channelId || !userId || !message) {
     return { levelUp: false };
@@ -99,10 +169,10 @@ async function addChat(chat) {
     false
   );
 
-  const channelTotalResult = await updateCounterDoc(
+  await updateCounterDoc(
     rootDoc(`channelTotal_${channelId}`).collection("users").doc(String(userId)),
     payload,
-    true
+    false
   );
 
   await updateCounterDoc(
@@ -117,13 +187,14 @@ async function addChat(chat) {
     false
   );
 
-  await updateCounterDoc(
+  // 🔥 여기만 레벨 계산
+  const globalResult = await updateCounterDoc(
     rootDoc(`globalTotal`).collection("users").doc(String(userId)),
     payload,
     true
   );
 
-  return channelTotalResult;
+  return globalResult;
 }
 
 function getRankRef({ channelId, scope = "channel", period = "daily" }) {
@@ -172,8 +243,22 @@ async function getRanking({ channelId, scope = "channel", period = "daily", limi
   }));
 }
 
-async function getLevelRanking(channelId, limit = 5) {
-  const snap = await rootDoc(`channelTotal_${toNumber(channelId)}`)
+// async function getLevelRanking(channelId, limit = 5) {
+//   const snap = await rootDoc(`channelTotal_${toNumber(channelId)}`)
+//     .collection("users")
+//     .orderBy("level", "desc")
+//     .orderBy("score", "desc")
+//     .limit(limit)
+//     .get();
+
+//   return snap.docs.map((doc, index) => ({
+//     rank: index + 1,
+//     ...doc.data()
+//   }));
+// }
+
+async function getLevelRanking(limit = 5) {
+  const snap = await rootDoc(`globalTotal`)
     .collection("users")
     .orderBy("level", "desc")
     .orderBy("score", "desc")
@@ -186,8 +271,8 @@ async function getLevelRanking(channelId, limit = 5) {
   }));
 }
 
-async function getUserLevel(channelId, userId) {
-  const ref = rootDoc(`channelTotal_${toNumber(channelId)}`)
+async function getUserLevel(userId) {
+  const ref = rootDoc(`globalTotal`)
     .collection("users")
     .doc(String(toNumber(userId)));
 

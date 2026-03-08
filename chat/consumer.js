@@ -23,16 +23,16 @@ function startConsumer() {
         }
 
         try {
-          if( chat.channelId != 999846 ) {
-            const levelResult = await rankStore.addChat(chat);
+          //if( chat.channelId != 999846 ) {
+          const levelResult = await rankStore.addChat(chat);
 
-            if (levelResult.levelUp) {
-              await sendChat(
-                chat.channelId,
-                `🎉 ${chat.nickname}님 레벨업! Lv.${levelResult.prevLevel} → Lv.${levelResult.nextLevel}`
-              );
-            }
-          } 
+          if (levelResult.levelUp) {
+            await sendChat(
+              chat.channelId,
+              `🎉 ${chat.nickname}님 레벨업! Lv.${levelResult.prevLevel} → Lv.${levelResult.nextLevel}`
+            );
+          }
+          //} 
         } catch (err) {
           console.log("rankStore addChat error:", err.message);
         }
