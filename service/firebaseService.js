@@ -21,7 +21,7 @@ async function watchChannels(onNewChannel) {
       ids.push(doc.id);
     });
 
-    //ids.push(2022)
+ //   ids.push(2022)
 
     const newChannels = ids.filter(id => !channelCache.includes(id));
 

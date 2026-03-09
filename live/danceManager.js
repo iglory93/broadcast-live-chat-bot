@@ -101,7 +101,20 @@ async function tick(channelId) {
   state.cursor += 1;
 
   try {
-    await sendChat(channelId, item.message);
+    //await sendChat(channelId, item.message);
+    const msg = item.message;
+
+    if (msg.startsWith("37_")) {
+
+    await sendChat(channelId, "", {
+        code: msg
+    });
+
+    } else {
+
+    await sendChat(channelId, msg);
+
+    }
   } catch (err) {
     const errorAt = now();
     if (errorAt - state.lastErrorAt > 5000) {

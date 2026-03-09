@@ -53,7 +53,6 @@ async function getCookie() {
 
   const initCookies = init.headers["set-cookie"] || [];
   const cookieJar = initCookies.map(c => c.split(";")[0]).join("; ");
-
   const res = await client.post(
     "/v2/api/auth/signin",
     {

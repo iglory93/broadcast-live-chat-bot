@@ -20,6 +20,47 @@ let index = 0;
 /**
  * 방송 상태 확인
  */
+// async function isLive(channelId) {
+
+//   try {
+
+//     let cookie = auth.getCookie();
+
+//     if (!cookie) {
+//       cookie = await getCookie();
+//     }
+
+//     const res = await axios.get(
+//       `https://api.ttinglive.com/api/channels/${channelId}/stream?option=all`,
+//       {
+//         headers: {
+//           "x-site-code": "ttinglive",
+//           cookie: cookie,
+//           "user-agent":
+//             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+//           accept: "application/json, text/plain, */*",
+//           origin: "https://www.ttinglive.com",
+//           referer: "https://www.ttinglive.com/"
+//         },
+//         timeout: 5000
+//       }
+//     );
+
+//     return res.data;
+
+//   } catch (e) {
+
+//     if (e.response && e.response.status === 400) {
+//       return null;
+//     }
+
+//     console.log(`[${channelId}] isLive error:`, e.message);
+
+//     return undefined;
+
+//   }
+
+// }
 async function isLive(channelId) {
 
   try {
@@ -29,7 +70,7 @@ async function isLive(channelId) {
     if (!cookie) {
       cookie = await getCookie();
     }
-
+console.log("cookie:", cookie);   
     const res = await axios.get(
       `https://api.ttinglive.com/api/channels/${channelId}/stream?option=all`,
       {
@@ -50,8 +91,46 @@ async function isLive(channelId) {
 
   } catch (e) {
 
-    if (e.response && e.response.status === 400) {
+    if (e.response?.status === 400) {
       return null;
+    }
+
+    /* 🔥 401이면 쿠키 재로그인 */
+    if (e.response?.status === 401) {
+
+      console.log(`[${channelId}] cookie expired → relogin`);
+console.log("cookie:", cookie);   
+      const newCookie = await getCookie();
+
+      if (!newCookie) return undefined;
+
+      try {
+
+        const res = await axios.get(
+          `https://api.ttinglive.com/api/channels/${channelId}/stream?option=all`,
+          {
+            headers: {
+              "x-site-code": "ttinglive",
+              cookie: newCookie,
+              "user-agent":
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+              accept: "application/json, text/plain, */*",
+              origin: "https://www.ttinglive.com",
+              referer: "https://www.ttinglive.com/"
+            },
+            timeout: 5000
+          }
+        );
+
+        return res.data;
+
+      } catch (err) {
+
+        console.log(`[${channelId}] relogin failed`, err.message);
+        return undefined;
+
+      }
+
     }
 
     console.log(`[${channelId}] isLive error:`, e.message);
