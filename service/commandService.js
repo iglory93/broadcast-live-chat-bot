@@ -10,6 +10,8 @@ const streamStore = require("../store/streamStore");
 const attendanceStore = require("../store/attendanceStore");
 const danceStore = require("../store/danceStore");
 const danceManager = require("../live/danceManager");
+const songRequestService = require("./songRequestService");
+
 
 async function getNicknameMap(rows) {
   const ids = [...new Set(rows.map(row => String(row.userId)))];
@@ -827,6 +829,63 @@ async function handleCommand(chat) {
 
       const weatherMsg = await getWeather(city);
       await sendChat(channelId, weatherMsg);
+      return;
+    }
+
+        /* 유튜브연결 */
+    else if (command === "유튜브연결") {
+      if (!songRequestService.isManager(chat, channelId)) {
+        await sendChat(channelId, "유튜브 연결 권한 없음");
+        return;
+      }
+
+      const connectMessage = await songRequestService.getConnectMessage(channelId);
+      await sendChat(channelId, connectMessage);
+      return;
+    }
+
+    /* 신청 */
+    else if (command.startsWith("신청 ")) {
+      const result = await songRequestService.addRequest(chat, command);
+      await sendChat(channelId, result.message);
+      return;
+    }
+
+    /* 신청목록 */
+    else if (command === "신청목록") {
+      const msg = await songRequestService.getQueueMessage(channelId);
+      await sendChat(channelId, msg);
+      return;
+    }
+
+    /* 다음곡 */
+    else if (command === "다음곡") {
+      if (!songRequestService.isManager(chat, channelId)) {
+        await sendChat(channelId, "다음곡 처리 권한 없음");
+        return;
+      }
+
+      const result = await songRequestService.completeCurrent(channelId);
+      await sendChat(channelId, result.message);
+      return;
+    }
+
+    /* 신청취소 */
+    else if (command === "신청취소") {
+      const result = await songRequestService.cancelMine(chat);
+      await sendChat(channelId, result.message);
+      return;
+    }
+
+    /* 신청초기화 */
+    else if (command === "신청초기화") {
+      if (!songRequestService.isManager(chat, channelId)) {
+        await sendChat(channelId, "신청초기화 권한 없음");
+        return;
+      }
+
+      const result = await songRequestService.clearAll(channelId);
+      await sendChat(channelId, result.message);
       return;
     }
 
