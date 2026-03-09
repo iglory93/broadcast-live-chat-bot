@@ -832,7 +832,7 @@ async function handleCommand(chat) {
       return;
     }
 
-        /* 유튜브연결 */
+    /* 유튜브연결 */
     else if (command === "유튜브연결") {
       if (!songRequestService.isManager(chat, channelId)) {
         await sendChat(channelId, "유튜브 연결 권한 없음");
@@ -844,17 +844,29 @@ async function handleCommand(chat) {
       return;
     }
 
-    /* 신청 */
-    else if (command.startsWith("신청 ")) {
-      const result = await songRequestService.addRequest(chat, command);
+    /* 신청목록 */
+    else if (command === "신청목록" || command === "신청 목록") {
+      const msg = await songRequestService.getQueueMessage(channelId);
+      await sendChat(channelId, msg);
+      return;
+    }
+
+    /* 신청취소 */
+    else if (command === "신청취소" || command === "신청 취소") {
+      const result = await songRequestService.cancelMine(chat);
       await sendChat(channelId, result.message);
       return;
     }
 
-    /* 신청목록 */
-    else if (command === "신청목록") {
-      const msg = await songRequestService.getQueueMessage(channelId);
-      await sendChat(channelId, msg);
+    /* 신청초기화 */
+    else if (command === "신청초기화" || command === "신청 초기화") {
+      if (!songRequestService.isManager(chat, channelId)) {
+        await sendChat(channelId, "신청초기화 권한 없음");
+        return;
+      }
+
+      const result = await songRequestService.clearAll(channelId);
+      await sendChat(channelId, result.message);
       return;
     }
 
@@ -870,22 +882,15 @@ async function handleCommand(chat) {
       return;
     }
 
-    /* 신청취소 */
-    else if (command === "신청취소") {
-      const result = await songRequestService.cancelMine(chat);
-      await sendChat(channelId, result.message);
-      return;
-    }
-
-    /* 신청초기화 */
-    else if (command === "신청초기화") {
-      if (!songRequestService.isManager(chat, channelId)) {
-        await sendChat(channelId, "신청초기화 권한 없음");
-        return;
+    /* 신청 */
+    else if (command.startsWith("신청 ")) {
+      try {
+        const result = await songRequestService.addRequest(chat, command);
+        await sendChat(channelId, result.message);
+      } catch (err) {
+        console.error("song request error:", err);
+        await sendChat(channelId, `신청 처리 실패: ${err.message}`);
       }
-
-      const result = await songRequestService.clearAll(channelId);
-      await sendChat(channelId, result.message);
       return;
     }
 

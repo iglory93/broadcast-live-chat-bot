@@ -22,41 +22,42 @@ async function enqueue(channelId, row) {
 
 async function getQueue(channelId, limit = 20) {
   const snap = await queueCollection(channelId)
+    .where("status", "in", ["queued", "playing"])
     .orderBy("createdAt", "asc")
     .limit(Math.max(Number(limit) || 20, 1))
     .get();
 
   const rows = [];
-
-  snap.forEach(doc => {
-    const data = doc.data();
-
-    if (["queued", "playing"].includes(data.status)) {
-      rows.push(data);
-    }
-  });
-
+  snap.forEach(doc => rows.push(doc.data()));
   return rows;
 }
 
 async function findActiveByVideoId(channelId, videoId) {
   const snap = await queueCollection(channelId)
     .where("videoId", "==", String(videoId))
+    .where("status", "in", ["queued", "playing"])
+    .limit(1)
     .get();
 
-  for (const doc of snap.docs) {
-    const data = doc.data();
-    if (["queued", "playing"].includes(data.status)) {
-      return data;
-    }
+  if (snap.empty) {
+    return null;
   }
 
-  return null;
+  return snap.docs[0].data();
 }
 
 async function getFirstActive(channelId) {
-  const rows = await getQueue(channelId, 100);
-  return rows[0] || null;
+  const snap = await queueCollection(channelId)
+    .where("status", "in", ["queued", "playing"])
+    .orderBy("createdAt", "asc")
+    .limit(1)
+    .get();
+
+  if (snap.empty) {
+    return null;
+  }
+
+  return snap.docs[0].data();
 }
 
 async function markDone(channelId, requestId) {
@@ -84,40 +85,37 @@ async function markCancelled(channelId, requestId) {
 async function cancelLatestByRequester(channelId, requesterId) {
   const snap = await queueCollection(channelId)
     .where("requesterId", "==", String(requesterId))
+    .where("status", "in", ["queued", "playing"])
+    .orderBy("createdAt", "desc")
+    .limit(1)
     .get();
 
-  const rows = [];
-  snap.forEach(doc => rows.push(doc.data()));
-
-  rows.sort((a, b) => {
-    const at = a.createdAt?.toMillis ? a.createdAt.toMillis() : new Date(a.createdAt || 0).getTime();
-    const bt = b.createdAt?.toMillis ? b.createdAt.toMillis() : new Date(b.createdAt || 0).getTime();
-    return bt - at;
-  });
-
-  const target = rows.find(row => ["queued", "playing"].includes(row.status));
-
-  if (!target) {
+  if (snap.empty) {
     return null;
   }
 
+  const target = snap.docs[0].data();
   await markCancelled(channelId, target.requestId);
   return target;
 }
 
 async function clearActiveQueue(channelId) {
-  const snap = await queueCollection(channelId).get();
+  const snap = await queueCollection(channelId)
+    .where("status", "in", ["queued", "playing"])
+    .get();
+
   const batch = db.batch();
 
   snap.forEach(doc => {
-    const data = doc.data();
-    if (["queued", "playing"].includes(data.status)) {
-      batch.set(doc.ref, {
+    batch.set(
+      doc.ref,
+      {
         status: "cancelled",
         updatedAt: new Date(),
         cancelledAt: new Date()
-      }, { merge: true });
-    }
+      },
+      { merge: true }
+    );
   });
 
   await batch.commit();
