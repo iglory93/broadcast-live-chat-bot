@@ -11,6 +11,11 @@ let flushTimer = null;
 let flushing = false;
 let shuttingDown = false;
 
+const queryCache = require("./queryCache");
+
+const RANK_CACHE_TTL_MS = 5000;
+const SUMMARY_CACHE_TTL_MS = 5000;
+
 function getKstDate(offsetDays = 0) {
   const now = new Date();
   const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
@@ -410,6 +415,53 @@ function sortRankingRows(rows) {
   return rows;
 }
 
+// async function getRanking({
+//   channelId,
+//   scope = "channel",
+//   period = "daily",
+//   limit = 5,
+//   dayKey,
+//   monthKey
+// }) {
+//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
+//   const ref = rootDoc(docName).collection("users");
+
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+//     }
+//   }
+
+//   const rows = sortRankingRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//   return rows;
+// }
 async function getRanking({
   channelId,
   scope = "channel",
@@ -418,9 +470,21 @@ async function getRanking({
   dayKey,
   monthKey
 }) {
+  const cacheKey = [
+    "rank",
+    channelId,
+    scope,
+    period,
+    limit,
+    dayKey || "",
+    monthKey || ""
+  ];
+
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
+
   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
   const ref = rootDoc(docName).collection("users");
-
   const fetchSize = Math.max(limit * 5, 50);
 
   const snap = await ref
@@ -455,6 +519,7 @@ async function getRanking({
       ...row
     }));
 
+  queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
   return rows;
 }
 
@@ -475,7 +540,49 @@ function sortLevelRows(rows) {
   return rows;
 }
 
+// async function getLevelRanking(limit = 5) {
+//   const docName = "globalTotal";
+//   const ref = rootDoc(docName).collection("users");
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("level", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: true }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: true }));
+//     }
+//   }
+
+//   return sortLevelRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+// }
+
 async function getLevelRanking(limit = 5) {
+  const cacheKey = ["levelRank", limit];
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
+
   const docName = "globalTotal";
   const ref = rootDoc(docName).collection("users");
   const fetchSize = Math.max(limit * 5, 50);
@@ -505,12 +612,15 @@ async function getLevelRanking(limit = 5) {
     }
   }
 
-  return sortLevelRows(Array.from(mergedMap.values()))
+  const rows = sortLevelRows(Array.from(mergedMap.values()))
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
       ...row
     }));
+
+  queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+  return rows;
 }
 
 async function getUserLevel(userId) {
@@ -534,9 +644,54 @@ async function getDocData(docRef, docName, userId, options = {}) {
   return mergeBaseWithPending(base, pending, options);
 }
 
+// async function getUserChatSummary(channelId, userId) {
+//   const cid = toNumber(channelId);
+//   const uid = toNumber(userId);
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   const channelDailyName = `channelDaily_${today}_${cid}`;
+//   const channelMonthlyName = `channelMonthly_${month}_${cid}`;
+//   const channelTotalName = `channelTotal_${cid}`;
+//   const globalDailyName = `globalDaily_${today}`;
+//   const globalMonthlyName = `globalMonthly_${month}`;
+//   const globalTotalName = `globalTotal`;
+
+//   const [
+//     channelDaily,
+//     channelMonthly,
+//     channelTotal,
+//     globalDaily,
+//     globalMonthly,
+//     globalTotal
+//   ] = await Promise.all([
+//     getDocData(rootDoc(channelDailyName).collection("users").doc(String(uid)), channelDailyName, uid),
+//     getDocData(rootDoc(channelMonthlyName).collection("users").doc(String(uid)), channelMonthlyName, uid),
+//     getDocData(rootDoc(channelTotalName).collection("users").doc(String(uid)), channelTotalName, uid),
+//     getDocData(rootDoc(globalDailyName).collection("users").doc(String(uid)), globalDailyName, uid),
+//     getDocData(rootDoc(globalMonthlyName).collection("users").doc(String(uid)), globalMonthlyName, uid),
+//     getDocData(rootDoc(globalTotalName).collection("users").doc(String(uid)), globalTotalName, uid, { saveLevel: true })
+//   ]);
+
+//   return {
+//     userId: uid,
+//     channelId: cid,
+//     channelDaily,
+//     channelMonthly,
+//     channelTotal,
+//     globalDaily,
+//     globalMonthly,
+//     globalTotal
+//   };
+// }
 async function getUserChatSummary(channelId, userId) {
   const cid = toNumber(channelId);
   const uid = toNumber(userId);
+
+  const cacheKey = ["chatSummary", cid, uid];
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
+
   const today = getTodayKey();
   const month = getMonthKey();
 
@@ -563,7 +718,7 @@ async function getUserChatSummary(channelId, userId) {
     getDocData(rootDoc(globalTotalName).collection("users").doc(String(uid)), globalTotalName, uid, { saveLevel: true })
   ]);
 
-  return {
+  const result = {
     userId: uid,
     channelId: cid,
     channelDaily,
@@ -573,6 +728,9 @@ async function getUserChatSummary(channelId, userId) {
     globalMonthly,
     globalTotal
   };
+
+  queryCache.set(cacheKey, result, SUMMARY_CACHE_TTL_MS);
+  return result;
 }
 
 async function getOrCreateLevelState(userId, channelId) {
@@ -597,7 +755,48 @@ async function getOrCreateLevelState(userId, channelId) {
   return state;
 }
 
+// async function getBroadcastRanking(broadcastId, limit = 5) {
+//   const docName = `broadcast_${broadcastId}`;
+//   const ref = rootDoc(docName).collection("users");
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+//     }
+//   }
+
+//   return sortRankingRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+// }
 async function getBroadcastRanking(broadcastId, limit = 5) {
+  const cacheKey = ["broadcastRank", broadcastId, limit];
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
+
   const docName = `broadcast_${broadcastId}`;
   const ref = rootDoc(docName).collection("users");
   const fetchSize = Math.max(limit * 5, 50);
@@ -627,12 +826,15 @@ async function getBroadcastRanking(broadcastId, limit = 5) {
     }
   }
 
-  return sortRankingRows(Array.from(mergedMap.values()))
+  const rows = sortRankingRows(Array.from(mergedMap.values()))
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
       ...row
     }));
+
+  queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+  return rows;
 }
 
 module.exports = {

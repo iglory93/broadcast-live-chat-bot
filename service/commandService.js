@@ -11,6 +11,23 @@ const attendanceStore = require("../store/attendanceStore");
 const danceStore = require("../store/danceStore");
 const danceManager = require("../live/danceManager");
 
+async function getNicknameMap(rows) {
+  const ids = [...new Set(rows.map(row => String(row.userId)))];
+
+  const pairs = await Promise.all(
+    ids.map(async (userId) => {
+      const nickname = await profileCache.getNickname(userId);
+      return [userId, nickname || `유저${userId}`];
+    })
+  );
+
+  return Object.fromEntries(pairs);
+}
+
+async function getNicknameOrDefault(userId) {
+  return (await profileCache.getNickname(userId)) || `유저${userId}`;
+}
+
 async function handleCommand(chat) {
   const channelId = String(chat?.channelId);
   //console.log("channelId:", channelId);
@@ -427,9 +444,9 @@ async function handleCommand(chat) {
         return;
       }
 
-      const nickname =
-        await profileCache.getNickname(targetUserId) || `유저${targetUserId}`;
-
+      // const nickname =
+      //   await profileCache.getNickname(targetUserId) || `유저${targetUserId}`;
+      const nickname = await getNicknameOrDefault(targetUserId);
       const rank = info.today?.rank || "-";
       const streak = info.monthly?.streak || 1;
       const monthlyCount = info.monthly?.monthlyCount || 1;
@@ -442,6 +459,25 @@ async function handleCommand(chat) {
     }
 
     /* 출석순위 */
+    // else if (command.startsWith("출석순위")) {
+    //   const ranking = await attendanceStore.getDailyRanking(channelId, 10);
+
+    //   if (!ranking.length) {
+    //     await sendChat(channelId, "오늘 출석자가 없습니다.");
+    //     return;
+    //   }
+
+    //   const lines = ["📅 오늘의 출석 순위"];
+
+    //   for (const row of ranking) {
+    //     const nickname =
+    //       await profileCache.getNickname(row.userId) || `유저${row.userId}`;
+    //     lines.push(`${row.rank}위 ${nickname}`);
+    //   }
+
+    //   await sendChat(channelId, lines.join("\n"));
+    //   return;
+    // }
     else if (command.startsWith("출석순위")) {
       const ranking = await attendanceStore.getDailyRanking(channelId, 10);
 
@@ -450,18 +486,41 @@ async function handleCommand(chat) {
         return;
       }
 
+      const nicknameMap = await getNicknameMap(ranking);
       const lines = ["📅 오늘의 출석 순위"];
 
       for (const row of ranking) {
-        const nickname =
-          await profileCache.getNickname(row.userId) || `유저${row.userId}`;
-        lines.push(`${row.rank}위 ${nickname}`);
+        lines.push(`${row.rank}위 ${nicknameMap[String(row.userId)]}`);
       }
 
       await sendChat(channelId, lines.join("\n"));
       return;
     }
 
+    /* 월출석순위 */
+    // else if (command === "월출석순위") {
+    //   const ranking = await attendanceStore.getMonthlyRanking(channelId, 10);
+
+    //   if (!ranking.length) {
+    //     await sendChat(channelId, "이번 달 출석자가 없습니다.");
+    //     return;
+    //   }
+
+    //   const lines = ["🗓 이번달 출석 순위"];
+
+    //   for (let i = 0; i < ranking.length; i++) {
+    //     const row = ranking[i];
+    //     const nickname =
+    //       await profileCache.getNickname(row.userId) || `유저${row.userId}`;
+
+    //     lines.push(
+    //       `${i + 1}위 ${nickname} (${row.monthlyCount}일, 연속 ${row.streak}일)`
+    //     );
+    //   }
+
+    //   await sendChat(channelId, lines.join("\n"));
+    //   return;
+    // }
     /* 월출석순위 */
     else if (command === "월출석순위") {
       const ranking = await attendanceStore.getMonthlyRanking(channelId, 10);
@@ -471,15 +530,13 @@ async function handleCommand(chat) {
         return;
       }
 
+      const nicknameMap = await getNicknameMap(ranking);
       const lines = ["🗓 이번달 출석 순위"];
 
       for (let i = 0; i < ranking.length; i++) {
         const row = ranking[i];
-        const nickname =
-          await profileCache.getNickname(row.userId) || `유저${row.userId}`;
-
         lines.push(
-          `${i + 1}위 ${nickname} (${row.monthlyCount}일, 연속 ${row.streak}일)`
+          `${i + 1}위 ${nicknameMap[String(row.userId)]} (${row.monthlyCount}일, 연속 ${row.streak}일)`
         );
       }
 
@@ -487,6 +544,25 @@ async function handleCommand(chat) {
       return;
     }
 
+    /* 레벨 */
+    // else if (command.startsWith("레벨순위")) {
+    //   const ranking = await rankStore.getLevelRanking(10);
+
+    //   if (!ranking.length) {
+    //     await sendChat(channelId, "레벨 정보가 없습니다.");
+    //     return;
+    //   }
+
+    //   const lines = ["👑 레벨 순위"];
+
+    //   for (const row of ranking) {
+    //     const nickname = await profileCache.getNickname(row.userId);
+    //     lines.push(`${row.rank}위 ${nickname} Lv.${row.level} (${row.score}점)`);
+    //   }
+
+    //   await sendChat(channelId, lines.join("\n"));
+    //   return;
+    // }
     /* 레벨 */
     else if (command.startsWith("레벨순위")) {
       const ranking = await rankStore.getLevelRanking(10);
@@ -496,11 +572,11 @@ async function handleCommand(chat) {
         return;
       }
 
+      const nicknameMap = await getNicknameMap(ranking);
       const lines = ["👑 레벨 순위"];
 
       for (const row of ranking) {
-        const nickname = await profileCache.getNickname(row.userId);
-        lines.push(`${row.rank}위 ${nickname} Lv.${row.level} (${row.score}점)`);
+        lines.push(`${row.rank}위 ${nicknameMap[String(row.userId)]} Lv.${row.level} (${row.score}점)`);
       }
 
       await sendChat(channelId, lines.join("\n"));
@@ -551,6 +627,52 @@ async function handleCommand(chat) {
     }
 
     /* 채팅순위 */
+    // else if (command.startsWith("채팅순위")) {
+    //   const parsed = parseChatRankCommand(command);
+
+    //   let ranking = [];
+    //   let title = "";
+
+    //   if (parsed.period === "broadcast" && parsed.scope === "channel") {
+    //     const streamInfo = streamStore.get(channelId);
+    //     const broadcastId = streamInfo?.broadcastId || null;
+
+    //     if (!broadcastId) {
+    //       await sendChat(channelId, "현재 방송 정보를 찾을 수 없습니다.");
+    //       return;
+    //     }
+
+    //     ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
+    //     title = getChatRankTitle(parsed.scope, parsed.period);
+    //   } else {
+    //     console.log(getDateKey(parsed.dayOffset))
+    //     ranking = await rankStore.getRanking({
+    //       channelId,
+    //       scope: parsed.scope,
+    //       period: parsed.period,
+    //       limit: 10,
+    //       dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
+    //     });
+
+    //     title = getChatRankTitle(parsed.scope, parsed.period);
+    //   }
+
+    //   if (!ranking.length) {
+    //     await sendChat(channelId, "채팅 순위 정보가 없습니다.");
+    //     return;
+    //   }
+
+    //   const lines = [title];
+
+    //   for (const row of ranking) {
+    //     const nickname = await profileCache.getNickname(row.userId);
+    //     lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
+    //   }
+
+    //   await sendChat(channelId, lines.join("\n"));
+    //   return;
+    // }
+    /* 채팅순위 */
     else if (command.startsWith("채팅순위")) {
       const parsed = parseChatRankCommand(command);
 
@@ -569,7 +691,6 @@ async function handleCommand(chat) {
         ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
         title = getChatRankTitle(parsed.scope, parsed.period);
       } else {
-        console.log(getDateKey(parsed.dayOffset))
         ranking = await rankStore.getRanking({
           channelId,
           scope: parsed.scope,
@@ -586,11 +707,11 @@ async function handleCommand(chat) {
         return;
       }
 
+      const nicknameMap = await getNicknameMap(ranking);
       const lines = [title];
 
       for (const row of ranking) {
-        const nickname = await profileCache.getNickname(row.userId);
-        lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
+        lines.push(`${row.rank}위 ${nicknameMap[String(row.userId)]} ${row.chatCount}회`);
       }
 
       await sendChat(channelId, lines.join("\n"));
@@ -629,8 +750,8 @@ async function handleCommand(chat) {
         return;
       }
 
-      const nickname = await profileCache.getNickname(targetUserId);
-
+      //const nickname = await profileCache.getNickname(targetUserId);
+      const nickname = await getNicknameOrDefault(targetUserId);
       const channelToday = Number(summary.channelDaily?.chatCount || 0);
       const channelMonth = Number(summary.channelMonthly?.chatCount || 0);
       const channelTotal = Number(summary.channelTotal?.chatCount || 0);

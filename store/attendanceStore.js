@@ -3,6 +3,8 @@ const db = require("../firebase");
 const streamStore = require("./streamStore");
 const BLOCKED_ATTENDANCE_USER_IDS = new Set(["999846"]);
 const sessionSeen = new Map();
+const queryCache = require("./queryCache");
+const ATTENDANCE_CACHE_TTL_MS = 5000;
 
 function getKstDate(offsetDays = 0) {
   const now = new Date();
@@ -170,6 +172,11 @@ async function attend({ channelId, userId, broadcastId, source = "manual" }) {
 
   markSeenInSession(channelId, userId, broadcastId);
 
+  if (result.ok && !result.already) {
+    queryCache.clearPrefix(`attendanceDaily::${channelId}::${dayKey}`);
+    queryCache.clearPrefix(`attendanceMonthly::${channelId}::${monthKey}`);
+  }
+
   return result;
 }
 
@@ -228,8 +235,25 @@ async function manualAttend(chat) {
   });
 }
 
+// async function getDailyRanking(channelId, limit = 10, offsetDays = 0) {
+//   const dayKey = getTodayKey(offsetDays);
+
+//   const snap = await getDailyRootDoc(String(channelId), dayKey)
+//     .collection("users")
+//     .orderBy("rank", "asc")
+//     .limit(limit)
+//     .get();
+
+//   const rows = [];
+//   snap.forEach(doc => rows.push(doc.data()));
+//   return rows;
+// }
 async function getDailyRanking(channelId, limit = 10, offsetDays = 0) {
   const dayKey = getTodayKey(offsetDays);
+  const cacheKey = ["attendanceDaily", channelId, dayKey, limit];
+
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
 
   const snap = await getDailyRootDoc(String(channelId), dayKey)
     .collection("users")
@@ -239,11 +263,32 @@ async function getDailyRanking(channelId, limit = 10, offsetDays = 0) {
 
   const rows = [];
   snap.forEach(doc => rows.push(doc.data()));
+
+  queryCache.set(cacheKey, rows, ATTENDANCE_CACHE_TTL_MS);
   return rows;
 }
 
+// async function getMonthlyRanking(channelId, limit = 10) {
+//   const monthKey = getMonthKey();
+
+//   const snap = await db.collection("attendance_monthly")
+//     .where("channelId", "==", String(channelId))
+//     .where("monthKey", "==", monthKey)
+//     .orderBy("monthlyCount", "desc")
+//     .orderBy("updatedAt", "asc")
+//     .limit(limit)
+//     .get();
+
+//   const rows = [];
+//   snap.forEach(doc => rows.push(doc.data()));
+//   return rows;
+// }
 async function getMonthlyRanking(channelId, limit = 10) {
   const monthKey = getMonthKey();
+  const cacheKey = ["attendanceMonthly", channelId, monthKey, limit];
+
+  const cached = queryCache.get(cacheKey);
+  if (cached) return cached;
 
   const snap = await db.collection("attendance_monthly")
     .where("channelId", "==", String(channelId))
@@ -255,8 +300,11 @@ async function getMonthlyRanking(channelId, limit = 10) {
 
   const rows = [];
   snap.forEach(doc => rows.push(doc.data()));
+
+  queryCache.set(cacheKey, rows, ATTENDANCE_CACHE_TTL_MS);
   return rows;
 }
+
 
 async function getMyTodayAttendance(channelId, userId) {
   const dayKey = getTodayKey();

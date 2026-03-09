@@ -70,7 +70,7 @@ async function isLive(channelId) {
     if (!cookie) {
       cookie = await getCookie();
     }
-console.log("cookie:", cookie);   
+//console.log("cookie:", cookie);   
     const res = await axios.get(
       `https://api.ttinglive.com/api/channels/${channelId}/stream?option=all`,
       {
