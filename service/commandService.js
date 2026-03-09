@@ -8,6 +8,8 @@ const rankStore = require("../store/rankStore");
 const profileCache = require("../store/profileCache");
 const streamStore = require("../store/streamStore");
 const attendanceStore = require("../store/attendanceStore");
+const danceStore = require("../store/danceStore");
+const danceManager = require("../live/danceManager");
 
 async function handleCommand(chat) {
   const channelId = String(chat?.channelId);
@@ -134,6 +136,209 @@ async function handleCommand(chat) {
   if (chat.type !== "chat") return;
 
   try {
+    /* 댄스시작 */
+    if (command.startsWith("댄스시작")) {
+      const parts = command.split(/\s+/).filter(Boolean);
+      const durationSec = parts.length >= 2 ? Number(parts[1]) : undefined;
+      const gapSec = parts.length >= 3 ? Number(parts[2]) : undefined;
+
+      const result = danceManager.start(channelId, {
+        durationSec,
+        gapSec
+      });
+
+      if (!result.ok) {
+        if (result.reason === "already_running") {
+          await sendChat(channelId, `💃 이미 댄스 진행 중입니다. 남은 시간 ${result.remainSec}초`);
+          return;
+        }
+
+        if (result.reason === "cooldown") {
+          await sendChat(channelId, `🕒 댄스 쿨타임입니다. ${result.cooldownSec}초 후 다시 시작할 수 있어요.`);
+          return;
+        }
+
+        if (result.reason === "no_routine") {
+          await sendChat(channelId, `댄스 루틴이 없습니다. ${startStr}댄스관리 1 💃 같은 식으로 먼저 등록해주세요.`);
+          return;
+        }
+      }
+
+      await sendChat(channelId, `💃 댄스 시작! 진행 ${result.durationSec}초 / 간격 ${result.gapSec}초 / 루틴 ${result.count}개`);
+      return;
+    }
+
+    /* 댄스종료 */
+    else if (command === "댄스종료") {
+      const master = String(chat?.clientChannelId);
+
+      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+        const result = danceManager.stop(channelId, "manual");
+
+        if (!result.ok) {
+          await sendChat(channelId, "현재 진행 중인 댄스가 없습니다.");
+          return;
+        }
+
+        await sendChat(channelId, "🛑 댄스를 종료했습니다. 종료 후 30초 쿨타임이 적용됩니다.");
+      } else {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+      }
+
+      return;
+    }
+
+    /* 댄스상태 */
+    else if (command === "댄스상태") {
+      const status = danceManager.getStatus(channelId);
+
+      if (status.running) {
+        await sendChat(channelId, `💃 댄스 진행 중 / 남은 시간 ${status.remainSec}초 / 간격 ${status.gapSec}초`);
+        return;
+      }
+
+      if (status.cooldownSec > 0) {
+        await sendChat(channelId, `🕒 현재 댄스 쿨타임 ${status.cooldownSec}초`);
+        return;
+      }
+
+      await sendChat(channelId, "댄스는 현재 대기 상태입니다.");
+      return;
+    }
+
+    /* 댄스관리 */
+    else if (command.startsWith("댄스관리 ")) {
+      const master = String(chat?.clientChannelId);
+
+      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+        const parts = command.split(/\s+/);
+
+        if (parts.length < 3) {
+          await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
+          return;
+        }
+
+        const slot = Number(parts[1]);
+        const messageText = parts.slice(2).join(" ").trim();
+
+        if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
+          await sendChat(channelId, "댄스 슬롯은 1~10만 가능합니다.");
+          return;
+        }
+
+        if (!messageText) {
+          await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
+          return;
+        }
+
+        await danceStore.setMessage(channelId, slot, messageText);
+        danceStore.primeScope(channelId);
+        await sendChat(channelId, `✅ 채널 댄스 루틴 등록: ${slot}번`);
+      } else {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+      }
+
+      return;
+    }
+
+    /* 댄스관리삭제 */
+    else if (command.startsWith("댄스관리삭제 ")) {
+      const master = String(chat?.clientChannelId);
+
+      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+        const parts = command.split(/\s+/).filter(Boolean);
+        const slot = Number(parts[1]);
+
+        if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
+          await sendChat(channelId, `사용법: ${startStr}댄스관리삭제 1`);
+          return;
+        }
+
+        await danceStore.removeMessage(channelId, slot);
+        await sendChat(channelId, `🗑 채널 댄스 루틴 삭제: ${slot}번`);
+      } else {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+      }
+
+      return;
+    }
+
+    /* 댄스공통 */
+    else if (command.startsWith("댄스공통 ")) {
+      const master = String(chat?.clientChannelId);
+
+      if (master === "999846" || master === "981141") {
+        const parts = command.split(/\s+/);
+
+        if (parts.length < 3) {
+          await sendChat(channelId, `사용법: ${startStr}댄스공통 1 💃`);
+          return;
+        }
+
+        const slot = Number(parts[1]);
+        const messageText = parts.slice(2).join(" ").trim();
+
+        if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
+          await sendChat(channelId, "댄스 슬롯은 1~10만 가능합니다.");
+          return;
+        }
+
+        if (!messageText) {
+          await sendChat(channelId, `사용법: ${startStr}댄스공통 1 💃`);
+          return;
+        }
+
+        await danceStore.setMessage("global", slot, messageText);
+        danceStore.primeScope("global");
+        await sendChat(channelId, `🌍 공통 댄스 루틴 등록: ${slot}번`);
+      } else {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+      }
+
+      return;
+    }
+
+    /* 댄스공통삭제 */
+    else if (command.startsWith("댄스공통삭제 ")) {
+      const master = String(chat?.clientChannelId);
+
+      if (master === "999846" || master === "981141") {
+        const parts = command.split(/\s+/).filter(Boolean);
+        const slot = Number(parts[1]);
+
+        if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
+          await sendChat(channelId, `사용법: ${startStr}댄스공통삭제 1`);
+          return;
+        }
+
+        await danceStore.removeMessage("global", slot);
+        await sendChat(channelId, `🗑 공통 댄스 루틴 삭제: ${slot}번`);
+      } else {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+      }
+
+      return;
+    }
+
+    /* 댄스목록 */
+    else if (command === "댄스목록") {
+      const routine = danceStore.getMergedRoutine(channelId);
+
+      if (!routine.length) {
+        await sendChat(channelId, "등록된 댄스 루틴이 없습니다.");
+        return;
+      }
+
+      const msg = ["💃 현재 댄스 루틴"];
+
+      routine.forEach(row => {
+        msg.push(`${row.slot}. ${row.message}`);
+      });
+
+      await sendChat(channelId, msg.join("\n"));
+      return;
+    }
+
     /* 계산 */
     if (typeof command === "string" && command.startsWith("계산")) {
       const expr = command.replace("계산", "").trim();
@@ -284,7 +489,6 @@ async function handleCommand(chat) {
 
     /* 레벨 */
     else if (command.startsWith("레벨순위")) {
-      //const ranking = await rankStore.getLevelRanking(channelId, 5);
       const ranking = await rankStore.getLevelRanking(10);
 
       if (!ranking.length) {
@@ -347,51 +551,51 @@ async function handleCommand(chat) {
     }
 
     /* 채팅순위 */
-   else if (command.startsWith("채팅순위")) {
-    const parsed = parseChatRankCommand(command);
+    else if (command.startsWith("채팅순위")) {
+      const parsed = parseChatRankCommand(command);
 
-    let ranking = [];
-    let title = "";
+      let ranking = [];
+      let title = "";
 
-    if (parsed.period === "broadcast" && parsed.scope === "channel") {
-      const streamInfo = streamStore.get(channelId);
-      const broadcastId = streamInfo?.broadcastId || null;
+      if (parsed.period === "broadcast" && parsed.scope === "channel") {
+        const streamInfo = streamStore.get(channelId);
+        const broadcastId = streamInfo?.broadcastId || null;
 
-      if (!broadcastId) {
-        await sendChat(channelId, "현재 방송 정보를 찾을 수 없습니다.");
+        if (!broadcastId) {
+          await sendChat(channelId, "현재 방송 정보를 찾을 수 없습니다.");
+          return;
+        }
+
+        ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
+        title = getChatRankTitle(parsed.scope, parsed.period);
+      } else {
+        console.log(getDateKey(parsed.dayOffset))
+        ranking = await rankStore.getRanking({
+          channelId,
+          scope: parsed.scope,
+          period: parsed.period,
+          limit: 10,
+          dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
+        });
+
+        title = getChatRankTitle(parsed.scope, parsed.period);
+      }
+
+      if (!ranking.length) {
+        await sendChat(channelId, "채팅 순위 정보가 없습니다.");
         return;
       }
 
-      ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
-      title = getChatRankTitle(parsed.scope, parsed.period);
-    } else {
-      console.log(getDateKey(parsed.dayOffset))
-      ranking = await rankStore.getRanking({
-        channelId,
-        scope: parsed.scope,
-        period: parsed.period,
-        limit: 10,
-        dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
-      });
+      const lines = [title];
 
-      title = getChatRankTitle(parsed.scope, parsed.period);
-    }
+      for (const row of ranking) {
+        const nickname = await profileCache.getNickname(row.userId);
+        lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
+      }
 
-    if (!ranking.length) {
-      await sendChat(channelId, "채팅 순위 정보가 없습니다.");
+      await sendChat(channelId, lines.join("\n"));
       return;
     }
-
-    const lines = [title];
-
-    for (const row of ranking) {
-      const nickname = await profileCache.getNickname(row.userId);
-      lines.push(`${row.rank}위 ${nickname} ${row.chatCount}회`);
-    }
-
-    await sendChat(channelId, lines.join("\n"));
-    return;
-  }
 
     /* 채팅확인 */
     else if (command.startsWith("채팅확인")) {
@@ -624,7 +828,7 @@ async function handleCommand(chat) {
     /* 채널추가 */
     else if (command.startsWith("채널추가 ")) {
       const master = String(chat?.clientChannelId);
-      //console.log( chat.role === "M")
+
       if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
         const parts = command.split(" ");
 
@@ -716,26 +920,6 @@ async function handleCommand(chat) {
   }
 }
 
-// function parseChatRankCommand(command) {
-//   const parts = command.split(/\s+/).filter(Boolean);
-
-//   let scope = "channel";
-//   let period = "daily";
-
-//   for (let i = 1; i < parts.length; i += 1) {
-//     const token = parts[i];
-
-//     if (token === "전체") {
-//       scope = "global";
-//     } else if (token === "월") {
-//       period = "monthly";
-//     } else if (token === "누적") {
-//       period = "total";
-//     }
-//   }
-
-//   return { scope, period };
-// }
 function parseChatRankCommand(command) {
   const parts = command.split(/\s+/).filter(Boolean);
 
@@ -856,4 +1040,5 @@ function getDateKey(offsetDays = 0) {
 
   return `${year}-${month}-${day}`;
 }
+
 module.exports = { handleCommand };

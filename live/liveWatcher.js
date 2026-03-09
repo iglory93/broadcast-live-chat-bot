@@ -6,6 +6,7 @@ const { startViewerWatcher, stopViewerWatcher } = require("./viewerWatcher");
 const sendChat = require("../chat/sendChat");
 const streamStore = require("../store/streamStore");
 const auth = require("../chat/auth");
+const danceManager = require("./danceManager");
 
 /* 채널 상태 */
 const channelState = {};
@@ -131,6 +132,7 @@ async function checkChannel(channelId) {
       // stopSocket(channelId);
 
       stopViewerWatcher(channelId);
+      danceManager.stop(channelId, "live_end");
 
     } catch (e) {
 

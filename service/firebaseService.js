@@ -4,6 +4,7 @@ const db = require("../firebase");
 let channelCache = [];
 let commandCache = {};
 let joinCache = {};
+const danceStore = require("../store/danceStore");
 
 
 /* =========================
@@ -27,6 +28,8 @@ async function watchChannels(onNewChannel) {
     newChannels.forEach(channelId => {
 
       console.log("새 채널 감지:", channelId);
+
+      danceStore.primeScope(channelId);
 
       if (onNewChannel) {
         onNewChannel(channelId);
@@ -147,28 +150,13 @@ function getChannels() {
    명령어 조회
 ========================= */
 
-// function getCommand(channelId, cmd) {
-
-//   const key = String(cmd).trim();
-
-//   if (commandCache[channelId] && commandCache[channelId][key]) {
-//     return commandCache[channelId][key];
-//   }
-
-//   if (commandCache.global && commandCache.global[key]) {
-//     return commandCache.global[key];
-//   }
-
-//   return null;
-
-// }
-
 function getCommand(channelId, cmd) {
 
-  channelId = String(channelId);   // ⭐ 추가
+  channelId = String(channelId);
   const key = String(cmd).trim();
-console.log("cache:", commandCache);
-console.log("find:", channelId, key);
+  console.log("cache:", commandCache);
+  console.log("find:", channelId, key);
+
   if (commandCache[channelId] && commandCache[channelId][key]) {
     return commandCache[channelId][key];
   }
@@ -184,6 +172,7 @@ console.log("find:", channelId, key);
 function getCommandCache() {
   return commandCache;
 }
+
 /* =========================
    입장 메시지 조회
 ========================= */
@@ -210,10 +199,12 @@ function getJoinMessage(channelId, userId) {
 async function startFirebaseService(onNewChannel) {
   console.log('1')
   await watchChannels(onNewChannel);
-console.log('2')
+  console.log('2')
   await watchCommands();
-console.log('3')
+  console.log('3')
   await watchJoinMessages();
+  danceStore.primeScope("global");
+  channelCache.forEach(channelId => danceStore.primeScope(channelId));
 
   console.log("Firebase 서비스 시작");
 
