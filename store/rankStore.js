@@ -253,50 +253,6 @@ async function shutdown() {
   }
 }
 
-// async function addChat(chat) {
-//   ensureFlushScheduler();
-
-//   const channelId = toNumber(chat.channelId);
-//   const clientChannelId = toNumber(chat.clientChannelId);
-//   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
-//   const message = String(chat.message || "").trim();
-
-//   if (String(clientChannelId) === AI_CHANNEL_ID) {
-//     return { levelUp: false, queued: false };
-//   }
-
-//   if (!channelId || !userId || !message) {
-//     return { levelUp: false, queued: false };
-//   }
-
-//   const score = calcScore(message);
-//   const today = getTodayKey();
-//   const month = getMonthKey();
-
-//   const payload = {
-//     userId,
-//     channelId,
-//     chatCount: 1,
-//     score
-//   };
-
-//   if (chat.broadcastId) {
-//     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
-//   }
-
-//   queueCounterUpdate(`channelDaily_${today}_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`channelMonthly_${month}_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
-
-//   return {
-//     levelUp: false,
-//     queued: true
-//   };
-// }
-
 async function addChat(chat) {
   ensureFlushScheduler();
 
@@ -415,53 +371,6 @@ function sortRankingRows(rows) {
   return rows;
 }
 
-// async function getRanking({
-//   channelId,
-//   scope = "channel",
-//   period = "daily",
-//   limit = 5,
-//   dayKey,
-//   monthKey
-// }) {
-//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
-//   const ref = rootDoc(docName).collection("users");
-
-//   const fetchSize = Math.max(limit * 5, 50);
-
-//   const snap = await ref
-//     .orderBy("chatCount", "desc")
-//     .orderBy("score", "desc")
-//     .limit(fetchSize)
-//     .get();
-
-//   const mergedMap = new Map();
-
-//   for (const doc of snap.docs) {
-//     const base = doc.data();
-//     const uid = String(toNumber(base.userId || doc.id));
-//     const pending = getPendingEntry(docName, uid);
-
-//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
-//   }
-
-//   const pendingEntries = getPendingEntriesByDocName(docName);
-
-//   for (const entry of pendingEntries) {
-//     const uid = String(entry.userId);
-//     if (!mergedMap.has(uid)) {
-//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
-//     }
-//   }
-
-//   const rows = sortRankingRows(Array.from(mergedMap.values()))
-//     .slice(0, limit)
-//     .map((row, index) => ({
-//       rank: index + 1,
-//       ...row
-//     }));
-
-//   return rows;
-// }
 async function getRanking({
   channelId,
   scope = "channel",
@@ -540,44 +449,6 @@ function sortLevelRows(rows) {
   return rows;
 }
 
-// async function getLevelRanking(limit = 5) {
-//   const docName = "globalTotal";
-//   const ref = rootDoc(docName).collection("users");
-//   const fetchSize = Math.max(limit * 5, 50);
-
-//   const snap = await ref
-//     .orderBy("level", "desc")
-//     .orderBy("score", "desc")
-//     .limit(fetchSize)
-//     .get();
-
-//   const mergedMap = new Map();
-
-//   for (const doc of snap.docs) {
-//     const base = doc.data();
-//     const uid = String(toNumber(base.userId || doc.id));
-//     const pending = getPendingEntry(docName, uid);
-
-//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: true }));
-//   }
-
-//   const pendingEntries = getPendingEntriesByDocName(docName);
-
-//   for (const entry of pendingEntries) {
-//     const uid = String(entry.userId);
-//     if (!mergedMap.has(uid)) {
-//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: true }));
-//     }
-//   }
-
-//   return sortLevelRows(Array.from(mergedMap.values()))
-//     .slice(0, limit)
-//     .map((row, index) => ({
-//       rank: index + 1,
-//       ...row
-//     }));
-// }
-
 async function getLevelRanking(limit = 5) {
   const cacheKey = ["levelRank", limit];
   const cached = queryCache.get(cacheKey);
@@ -644,46 +515,6 @@ async function getDocData(docRef, docName, userId, options = {}) {
   return mergeBaseWithPending(base, pending, options);
 }
 
-// async function getUserChatSummary(channelId, userId) {
-//   const cid = toNumber(channelId);
-//   const uid = toNumber(userId);
-//   const today = getTodayKey();
-//   const month = getMonthKey();
-
-//   const channelDailyName = `channelDaily_${today}_${cid}`;
-//   const channelMonthlyName = `channelMonthly_${month}_${cid}`;
-//   const channelTotalName = `channelTotal_${cid}`;
-//   const globalDailyName = `globalDaily_${today}`;
-//   const globalMonthlyName = `globalMonthly_${month}`;
-//   const globalTotalName = `globalTotal`;
-
-//   const [
-//     channelDaily,
-//     channelMonthly,
-//     channelTotal,
-//     globalDaily,
-//     globalMonthly,
-//     globalTotal
-//   ] = await Promise.all([
-//     getDocData(rootDoc(channelDailyName).collection("users").doc(String(uid)), channelDailyName, uid),
-//     getDocData(rootDoc(channelMonthlyName).collection("users").doc(String(uid)), channelMonthlyName, uid),
-//     getDocData(rootDoc(channelTotalName).collection("users").doc(String(uid)), channelTotalName, uid),
-//     getDocData(rootDoc(globalDailyName).collection("users").doc(String(uid)), globalDailyName, uid),
-//     getDocData(rootDoc(globalMonthlyName).collection("users").doc(String(uid)), globalMonthlyName, uid),
-//     getDocData(rootDoc(globalTotalName).collection("users").doc(String(uid)), globalTotalName, uid, { saveLevel: true })
-//   ]);
-
-//   return {
-//     userId: uid,
-//     channelId: cid,
-//     channelDaily,
-//     channelMonthly,
-//     channelTotal,
-//     globalDaily,
-//     globalMonthly,
-//     globalTotal
-//   };
-// }
 async function getUserChatSummary(channelId, userId) {
   const cid = toNumber(channelId);
   const uid = toNumber(userId);
@@ -755,43 +586,6 @@ async function getOrCreateLevelState(userId, channelId) {
   return state;
 }
 
-// async function getBroadcastRanking(broadcastId, limit = 5) {
-//   const docName = `broadcast_${broadcastId}`;
-//   const ref = rootDoc(docName).collection("users");
-//   const fetchSize = Math.max(limit * 5, 50);
-
-//   const snap = await ref
-//     .orderBy("chatCount", "desc")
-//     .orderBy("score", "desc")
-//     .limit(fetchSize)
-//     .get();
-
-//   const mergedMap = new Map();
-
-//   for (const doc of snap.docs) {
-//     const base = doc.data();
-//     const uid = String(toNumber(base.userId || doc.id));
-//     const pending = getPendingEntry(docName, uid);
-
-//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
-//   }
-
-//   const pendingEntries = getPendingEntriesByDocName(docName);
-
-//   for (const entry of pendingEntries) {
-//     const uid = String(entry.userId);
-//     if (!mergedMap.has(uid)) {
-//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
-//     }
-//   }
-
-//   return sortRankingRows(Array.from(mergedMap.values()))
-//     .slice(0, limit)
-//     .map((row, index) => ({
-//       rank: index + 1,
-//       ...row
-//     }));
-// }
 async function getBroadcastRanking(broadcastId, limit = 5) {
   const cacheKey = ["broadcastRank", broadcastId, limit];
   const cached = queryCache.get(cacheKey);

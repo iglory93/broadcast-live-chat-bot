@@ -4,15 +4,7 @@ const youtubeService = require("./youtubeService");
 const songRequestStore = require("../store/songRequestStore");
 const youtubeTokenStore = require("../store/youtubeTokenStore");
 
-function isManager(chat, channelId) {
-  const master = String(chat?.clientChannelId || "");
-  return (
-    master === "999846" ||
-    master === "981141" ||
-    master === String(channelId) ||
-    chat?.role === "M"
-  );
-}
+
 
 function buildConnectUrl(channelId) {
   const base = youtubeConfig.publicBaseUrl;

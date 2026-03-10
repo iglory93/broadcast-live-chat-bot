@@ -8,4 +8,8 @@ function getCookie() {
   return cookie;
 }
 
-module.exports = { setCookie, getCookie };
+function clearCookie() {
+  cookie = null;
+}
+
+module.exports = { setCookie, getCookie, clearCookie };

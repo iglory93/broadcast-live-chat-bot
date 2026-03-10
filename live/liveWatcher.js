@@ -99,9 +99,9 @@ async function isLive(channelId) {
     if (e.response?.status === 401) {
 
       console.log(`[${channelId}] cookie expired → relogin`);
-console.log("cookie:", cookie);   
-      const newCookie = await getCookie();
-
+      //console.log("cookie:", cookie);   
+      //const newCookie = await getCookie();
+      const newCookie = await getCookie(true);
       if (!newCookie) return undefined;
 
       try {
@@ -165,6 +165,11 @@ async function checkChannel(channelId) {
 
     channelState[channelId] = true;
     const streamId = stream?.stream?.id;
+
+    if (!streamId) {
+      console.log(`[${channelId}] streamId 없음`);
+      return;
+    }
     const broadcastId = `${channelId}_${streamId}`;
     //streamStore.set(channelId, stream);
     streamStore.set(channelId, {
@@ -251,7 +256,7 @@ async function watcherLoop() {
 
   }
 
-  setTimeout(watcherLoop, 1000);
+  setTimeout(watcherLoop, 2000);
 
 }
 

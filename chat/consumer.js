@@ -4,6 +4,7 @@
 // const rankStore = require("../store/rankStore");
 // const sendChat = require("./sendChat");
 // const profileCache = require("../store/profileCache");
+// const attendanceStore = require("../store/attendanceStore"); // 추가
 
 // function startConsumer() {
 //   console.log("chat consumer 시작");
@@ -22,6 +23,30 @@
 
 //         if (chat.clientChannelId && chat.nickname) {
 //           profileCache.warmNickname(chat.clientChannelId, chat.nickname);
+//         }
+
+//         const rawMessage = Array.isArray(chat.message)
+//           ? chat.message.map(m => m?.msg || "").join(" ").trim()
+//           : String(chat.message || "").trim();
+
+//         const isManualAttendCommand =
+//           rawMessage === "!출석" || rawMessage === "#출석";
+
+//         // !출석 / #출석이면 commandService에서 처리하게 넘기고
+//         // 그 외 첫 채팅이면 자동 출석
+//         if (!isManualAttendCommand) {
+//           attendanceStore.autoAttend(chat)
+//             .then(async (result) => {
+//               if (result?.ok) {
+//                 await sendChat(
+//                   chat.channelId,
+//                   `📅 ${chat.nickname}님 출석 완료! 오늘 ${result.rank}등 / 연속 ${result.streak}일 / 이번달 ${result.monthlyCount}일`
+//                 );
+//               }
+//             })
+//             .catch(err => {
+//               console.log("attendance autoAttend error:", err.message);
+//             });
 //         }
 
 //         rankStore.addChat(chat)
@@ -52,7 +77,7 @@ const chatMemory = require("../store/chatMemoryStore");
 const rankStore = require("../store/rankStore");
 const sendChat = require("./sendChat");
 const profileCache = require("../store/profileCache");
-const attendanceStore = require("../store/attendanceStore"); // 추가
+const attendanceStore = require("../store/attendanceStore");
 
 function startConsumer() {
   console.log("chat consumer 시작");
@@ -80,8 +105,6 @@ function startConsumer() {
         const isManualAttendCommand =
           rawMessage === "!출석" || rawMessage === "#출석";
 
-        // !출석 / #출석이면 commandService에서 처리하게 넘기고
-        // 그 외 첫 채팅이면 자동 출석
         if (!isManualAttendCommand) {
           attendanceStore.autoAttend(chat)
             .then(async (result) => {
@@ -98,12 +121,16 @@ function startConsumer() {
         }
 
         rankStore.addChat(chat)
-          .then(levelResult => {
-            if (levelResult?.levelUp) {
-              return sendChat(
+          .then(async (result) => {
+            if (result?.levelUp) {
+              await sendChat(
                 chat.channelId,
-                `🎉 ${chat.nickname}님 레벨업! Lv.${levelResult.prevLevel} → Lv.${levelResult.nextLevel}`
+                `🎉 ${chat.nickname}님 레벨업! Lv.${result.prevLevel} → Lv.${result.nextLevel}`
               );
+            }
+
+            if (result?.chatMilestone && result?.message) {
+              await sendChat(chat.channelId, result.message);
             }
           })
           .catch(err => {

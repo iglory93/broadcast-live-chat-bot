@@ -13,7 +13,8 @@ const danceManager = require("../live/danceManager");
 const songRequestService = require("./songRequestService");
 const cleanStore = require("../store/cleanStore.js");
 const utils = require("../utils/util");
-
+const timerStore = require("../store/timerStore");
+const { getFortune } = require("../command/fortune");
 
 async function getNicknameMap(rows) {
   const ids = [...new Set(rows.map(row => String(row.userId)))];
@@ -875,14 +876,18 @@ async function handleCommand(chat) {
 
       const nick1 = parts[1];
       const nick2 = parts[2];
-      const percent = getCompatibility(nick1, nick2);
+      const result = getCompatibilityDetail(nick1, nick2);
 
-      let msg = `💘 ${nick1} ❤️ ${nick2}\n궁합: ${percent}%`;
+      const msg =
+`💘 ${nick1} ❤️ ${nick2} 궁합 분석
 
-      if (percent >= 90) msg += "\n🔥 천생연분!";
-      else if (percent >= 70) msg += "\n😊 잘 맞는 편!";
-      else if (percent >= 40) msg += "\n🙂 무난한 궁합";
-      else msg += "\n💀 위험한 관계";
+💞 케미: ${result.chemistry}%
+🗯 티키타카: ${result.tikiTaka}%
+⚠ 갈등지수: ${result.danger}%
+
+📊 최종 궁합: ${result.finalScore}%
+
+${result.resultText}`;
 
       await sendChat(channelId, msg);
       return;
@@ -964,13 +969,72 @@ async function handleCommand(chat) {
       return;
     }
 
+    /* 타이머 */
+    else if (command.startsWith("타이머")) {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "타이머 실행 권한 없음");
+        return;
+      }
+
+      const arg = command.replace(/^타이머/, "").trim();
+
+      if (!arg) {
+        const status = timerStore.getStatus(channelId);
+
+        if (!status.running) {
+          await sendChat(channelId, `사용법: ${startStr}타이머 10초 / ${startStr}타이머 1분30초 / ${startStr}타이머 중지`);
+          return;
+        }
+
+        await sendChat(channelId, `⏳ 현재 타이머 진행 중 / 남은 시간 ${timerStore.formatRemain(status.remainSec)}`);
+        return;
+      }
+
+      if (arg === "중지" || arg === "종료" || arg === "끔" || arg === "꺼") {
+        const result = timerStore.stop(channelId);
+
+        if (!result.ok) {
+          await sendChat(channelId, "현재 진행 중인 타이머가 없습니다.");
+          return;
+        }
+
+        await sendChat(channelId, "🛑 타이머를 중지했습니다.");
+        return;
+      }
+
+      const seconds = timerStore.parseDurationSeconds(arg);
+
+      if (!seconds) {
+        await sendChat(channelId, `시간 형식이 올바르지 않습니다. 예) ${startStr}타이머 10초 / ${startStr}타이머 2분`);
+        return;
+      }
+
+      if (seconds > 600) {
+        await sendChat(channelId, "타이머는 최대 10분까지 가능합니다.");
+        return;
+      }
+
+      const result = timerStore.start(channelId, seconds, chat.nickname || "");
+
+      if (!result.ok) {
+        if (result.reason === "already_running") {
+          await sendChat(channelId, `이미 타이머가 진행 중입니다. 남은 시간 ${timerStore.formatRemain(result.remainSec)}`);
+          return;
+        }
+
+        await sendChat(channelId, "타이머 시작에 실패했습니다.");
+        return;
+      }
+
+      await sendChat(channelId, `⏰ 타이머 ${timerStore.formatRemain(result.durationSec)} 시작합니다.`);
+      return;
+    }
+
     /* 운세 */
     else if (command === "운세") {
-      const data = getFortune(chat.nickname || "익명");
-
       await sendChat(
-        channelId,
-        `${chat.nickname || "익명"}님의 오늘 운세는? ${data}`
+          channelId,
+          getFortune(chat.nickname)
       );
 
       return;
@@ -1219,39 +1283,6 @@ function getChatRankTitle(scope, period, dayOffset = 0) {
   return `🏆 ${scopeText} 오늘 채팅 순위`;
 }
 
-function getFortune(nickname) {
-  try {
-    const today = new Date();
-
-    const dateStr =
-      today.getFullYear().toString() +
-      String(today.getMonth() + 1).padStart(2, "0") +
-      String(today.getDate()).padStart(2, "0");
-
-    const seed = nickname + dateStr;
-    const hash = crypto.createHash("sha256").update(seed).digest("hex");
-    const digitMatch = hash.match(/[0-9]/);
-    const index = digitMatch ? parseInt(digitMatch[0], 10) : 0;
-
-    const fortunes = [
-      "💀 오늘은 조용히 있는 게 좋습니다. 괜히 나섰다가 물폭탄 맞을 수도 있습니다.",
-      "🙂 평범한 하루입니다. 큰 일은 없지만 채팅으로 존재감은 남길 수 있습니다.",
-      "🍀 작은 행운이 찾아옵니다. 오늘 채팅 하나가 방송을 바꿀 수도 있습니다.",
-      "🎁 예상치 못한 선물이 있을지도 모릅니다. 하지만 기대하면 안 옵니다.",
-      "💬 채팅 운 상승! 오늘 채팅 치면 BJ가 읽어줄 확률이 높습니다.",
-      "🔥 오늘 드립력 폭발! 채팅창을 웃겨버릴 수도 있습니다.",
-      "💰 소소한 재물운이 있습니다. 커피 한 잔 얻어먹을 수도?",
-      "🎯 원하는 일이 은근히 잘 풀립니다. 시도해볼 가치 있는 하루입니다.",
-      "👑 오늘의 주인공 기운! 채팅창에서 존재감이 강해집니다.",
-      "🌟 대박 운세! 오늘은 뭐든 해봐도 되는 날입니다."
-    ];
-
-    return fortunes[index % fortunes.length];
-  } catch {
-    return "🙂 평범한 하루입니다.";
-  }
-}
-
 function getCompatibility(nick1, nick2) {
   const today = new Date();
 
@@ -1266,6 +1297,53 @@ function getCompatibility(nick1, nick2) {
   const num = parseInt(hash.substring(0, 4), 16);
 
   return num % 101;
+}
+
+function getCompatibilityDetail(nick1, nick2) {
+
+  const today = new Date();
+
+  const dateStr =
+    today.getFullYear().toString() +
+    String(today.getMonth() + 1).padStart(2, "0") +
+    String(today.getDate()).padStart(2, "0");
+
+  const pair = [nick1, nick2].sort().join("");
+  const seed = pair + dateStr;
+
+  const hash = crypto.createHash("sha256").update(seed).digest("hex");
+
+  function score(index) {
+    const num = parseInt(hash.substring(index * 4, index * 4 + 4), 16);
+    return num % 101;
+  }
+
+  const chemistry = score(0);
+  const tikiTaka = score(1);
+  const danger = score(2);
+
+  const safe = 100 - danger;
+
+  const finalScore = Math.round(
+    (chemistry + tikiTaka + safe) / 3
+  );
+
+  let resultText;
+
+  if (finalScore >= 90) resultText = "🔥 천생연분";
+  else if (finalScore >= 75) resultText = "😍 케미 폭발";
+  else if (finalScore >= 60) resultText = "😊 꽤 잘 맞는 궁합";
+  else if (finalScore >= 45) resultText = "🙂 무난한 궁합";
+  else if (finalScore >= 30) resultText = "😅 애매한 관계";
+  else resultText = "💀 파국의 궁합";
+
+  return {
+    chemistry,
+    tikiTaka,
+    danger,
+    finalScore,
+    resultText
+  };
 }
 
 function normalizeName(name) {
