@@ -11,6 +11,8 @@ const attendanceStore = require("../store/attendanceStore");
 const danceStore = require("../store/danceStore");
 const danceManager = require("../live/danceManager");
 const songRequestService = require("./songRequestService");
+const cleanStore = require("../store/cleanStore.js");
+const utils = require("../utils/util");
 
 
 async function getNicknameMap(rows) {
@@ -155,6 +157,7 @@ async function handleCommand(chat) {
   if (chat.type !== "chat") return;
 
   try {
+    
     /* 댄스시작 */
     if (command.startsWith("댄스시작")) {
       const parts = command.split(/\s+/).filter(Boolean);
@@ -189,9 +192,7 @@ async function handleCommand(chat) {
 
     /* 댄스종료 */
     else if (command === "댄스종료") {
-      const master = String(chat?.clientChannelId);
-
-      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         const result = danceManager.stop(channelId, "manual");
 
         if (!result.ok) {
@@ -227,9 +228,7 @@ async function handleCommand(chat) {
 
     /* 댄스관리 */
     else if (command.startsWith("댄스관리 ")) {
-      const master = String(chat?.clientChannelId);
-
-      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         const parts = command.split(/\s+/);
 
         if (parts.length < 3) {
@@ -264,7 +263,7 @@ async function handleCommand(chat) {
     else if (command.startsWith("댄스관리삭제 ")) {
       const master = String(chat?.clientChannelId);
 
-      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         const parts = command.split(/\s+/).filter(Boolean);
         const slot = Number(parts[1]);
 
@@ -284,9 +283,7 @@ async function handleCommand(chat) {
 
     /* 댄스공통 */
     else if (command.startsWith("댄스공통 ")) {
-      const master = String(chat?.clientChannelId);
-
-      if (master === "999846" || master === "981141") {
+      if (utils.isMaster(chat)) {
         const parts = command.split(/\s+/);
 
         if (parts.length < 3) {
@@ -321,7 +318,7 @@ async function handleCommand(chat) {
     else if (command.startsWith("댄스공통삭제 ")) {
       const master = String(chat?.clientChannelId);
 
-      if (master === "999846" || master === "981141") {
+      if (utils.isMaster(chat)) {
         const parts = command.split(/\s+/).filter(Boolean);
         const slot = Number(parts[1]);
 
@@ -355,6 +352,79 @@ async function handleCommand(chat) {
       });
 
       await sendChat(channelId, msg.join("\n"));
+      return;
+    }
+
+    /* 청소 */
+    else if (command === "청소") {
+      const lines = cleanStore.getLines(channelId);
+      const cleanMessage = cleanStore.buildCleanMessage(lines);
+
+      await sendChat(channelId, cleanMessage);
+      return;
+    }
+
+    /* 청소관리 */
+    else if (command.startsWith("청소관리 ")) {
+      if (!songRequestService.isManager(chat, channelId)) {
+        await sendChat(channelId, "청소관리 권한 없음");
+        return;
+      }
+
+      const parts = command.split(/\s+/).filter(Boolean);
+      const lines = Number(parts[1]);
+
+      if (!Number.isInteger(lines) || lines < 1 || lines > 50) {
+        await sendChat(channelId, `사용법: ${startStr}청소관리 10 (1~50)`);
+        return;
+      }
+
+      await cleanStore.setLines(channelId, lines);
+      cleanStore.primeScope(channelId);
+
+      await sendChat(channelId, `🧹 채널 청소 줄 수 설정: ${lines}줄`);
+      return;
+    }
+
+    /* 청소공통 */
+    else if (command.startsWith("청소공통 ")) {
+      const master = String(chat?.clientChannelId || "");
+
+      if (master !== "999846" && master !== "981141") {
+        await sendChat(channelId, "청소공통 설정 권한 없음");
+        return;
+      }
+
+      const parts = command.split(/\s+/).filter(Boolean);
+      const lines = Number(parts[1]);
+
+      if (!Number.isInteger(lines) || lines < 1 || lines > 50) {
+        await sendChat(channelId, `사용법: ${startStr}청소공통 10 (1~50)`);
+        return;
+      }
+
+      await cleanStore.setLines("global", lines);
+      cleanStore.primeScope("global");
+
+      await sendChat(channelId, `🌍 글로벌 청소 줄 수 설정: ${lines}줄`);
+      return;
+    }
+
+    /* 청소설정 */
+    else if (command === "청소설정") {
+      const resolved = cleanStore.getResolvedConfig(channelId);
+
+      const sourceText =
+        resolved.source === "channel"
+          ? "채널 설정"
+          : resolved.source === "global"
+            ? "글로벌 설정"
+            : "기본값";
+
+      await sendChat(
+        channelId,
+        `🧹 현재 청소 설정: ${resolved.lines}줄 (${sourceText})`
+      );
       return;
     }
 
@@ -834,7 +904,7 @@ async function handleCommand(chat) {
 
     /* 유튜브연결 */
     else if (command === "유튜브연결") {
-      if (!songRequestService.isManager(chat, channelId)) {
+      if (!utils.isManager(chat, channelId)) {
         await sendChat(channelId, "유튜브 연결 권한 없음");
         return;
       }
@@ -860,7 +930,7 @@ async function handleCommand(chat) {
 
     /* 신청초기화 */
     else if (command === "신청초기화" || command === "신청 초기화") {
-      if (!songRequestService.isManager(chat, channelId)) {
+      if (!utils.isManager(chat, channelId)) {
         await sendChat(channelId, "신청초기화 권한 없음");
         return;
       }
@@ -872,7 +942,7 @@ async function handleCommand(chat) {
 
     /* 다음곡 */
     else if (command === "다음곡") {
-      if (!songRequestService.isManager(chat, channelId)) {
+      if (!utils.isManager(chat, channelId)) {
         await sendChat(channelId, "다음곡 처리 권한 없음");
         return;
       }
@@ -909,9 +979,8 @@ async function handleCommand(chat) {
     /* 채널입장 */
     else if (command.startsWith("채널입장 ")) {
       const parts = command.split(" ");
-      const master = Number(chat?.clientChannelId);
 
-      if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         if (parts.length < 3) {
           await sendChat(channelId, `사용법: ${startStr}채널입장 유저아이디 입장멘트`);
           return;
@@ -931,9 +1000,8 @@ async function handleCommand(chat) {
 
     else if (command.startsWith("채널입장삭제 ")) {
       const parts = command.split(" ");
-      const master = Number(chat?.clientChannelId);
       
-      if (master === 999846 || master === 981141 || String(master) === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         if (parts.length < 2) {
           await sendChat(channelId, `사용법: ${startStr}채널입장삭제 유저아이디`);
           return;
@@ -952,9 +1020,7 @@ async function handleCommand(chat) {
 
     else if (command.startsWith("입장 ")) {
       const parts = command.split(" ");
-      const master = Number(chat?.clientChannelId);
-
-      if (master === 999846 || master === 981141) {
+      if (utils.isMaster(chat)) {
         if (parts.length < 3) {
           await sendChat(channelId, `사용법: ${startStr}입장 유저아이디 입장멘트`);
           return;
@@ -974,9 +1040,8 @@ async function handleCommand(chat) {
 
     else if (command.startsWith("입장삭제 ")) {
       const parts = command.split(" ");
-      const master = Number(chat?.clientChannelId);
 
-      if (master === 999846 || master === 981141) {
+      if (utils.isMaster(chat)) {
         if (parts.length < 2) {
           await sendChat(channelId, `사용법: ${startStr}입장삭제 유저아이디`);
           return;
@@ -1012,9 +1077,7 @@ async function handleCommand(chat) {
 
     /* 채널추가 */
     else if (command.startsWith("채널추가 ")) {
-      const master = String(chat?.clientChannelId);
-
-      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         const parts = command.split(" ");
 
         if (parts.length < 3) {
@@ -1030,16 +1093,13 @@ async function handleCommand(chat) {
       } else {
         await sendChat(channelId, "명령어 추가 권한 없음");
       }
-
       return;
     }
 
     /* 글로벌 삭제 */
     else if (command.startsWith("삭제 ")) {
       const parts = command.split(" ");
-      const master = String(chat?.clientChannelId);
-
-      if (master === "999846" || master === "981141") {
+      if (utils.isMaster(chat)) {
         if (parts.length < 2) {
           await sendChat(channelId, `사용법: ${startStr}삭제 키`);
           return;
@@ -1059,9 +1119,8 @@ async function handleCommand(chat) {
     /* 채널삭제 */
     else if (command.startsWith("채널삭제 ")) {
       const parts = command.split(" ");
-      const master = String(chat?.clientChannelId);
 
-      if (master === "999846" || master === "981141" || master === channelId || chat.role === "M") {
+      if (utils.isManager(chat, channelId)) {
         if (parts.length < 2) {
           await sendChat(channelId, "사용법: #채널삭제 키");
           return;
