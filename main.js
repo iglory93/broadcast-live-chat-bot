@@ -1,5 +1,5 @@
 const { startConsumer } = require("./chat/consumer");
-const { startLiveWatcher } = require("./live/liveWatcher");
+const { startLiveWatcher, stopLiveWatcher } = require("./live/liveWatcher");
 const firebaseService = require("./service/firebaseService.js");
 const config = require("./config/config");
 const rankStore = require("./store/rankStore");
@@ -30,11 +30,21 @@ async function start() {
 
     console.log("config :", JSON.stringify(config));
 
-    await firebaseService.startFirebaseService((channelId) => {
-      console.log("채널 자동 연결:", channelId);
-      startLiveWatcher(channelId);
-    });
+    // await firebaseService.startFirebaseService((channelId) => {
+    //   console.log("채널 자동 연결:", channelId);
+    //   startLiveWatcher(channelId);
+    // });
 
+    await firebaseService.startFirebaseService(
+      (channelId) => {
+        console.log("채널 자동 연결:", channelId);
+        startLiveWatcher(channelId);
+      },
+      (channelId) => {
+        console.log("채널 자동 제거:", channelId);
+        stopLiveWatcher(channelId);
+      }
+    );
     startConsole();
   } catch (e) {
     console.error("start error:", e);

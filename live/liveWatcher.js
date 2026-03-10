@@ -280,6 +280,21 @@ function startLiveWatcher(channelId) {
 /**
  * watcher 종료
  */
+// function stopLiveWatcher(channelId) {
+
+//   channelId = String(channelId);
+
+//   if (!channels.has(channelId)) {
+//     return;
+//   }
+
+//   console.log("liveWatcher 제거:", channelId);
+
+//   channels.delete(channelId);
+
+//   delete channelState[channelId];
+
+// }
 function stopLiveWatcher(channelId) {
 
   channelId = String(channelId);
@@ -293,6 +308,23 @@ function stopLiveWatcher(channelId) {
   channels.delete(channelId);
 
   delete channelState[channelId];
+
+  try {
+
+    /* 방송 강제 종료 */
+    stopCollector(channelId);
+
+    stopViewerWatcher(channelId);
+
+    danceManager.stop(channelId, "channel_removed");
+
+    streamStore.remove(channelId);
+
+  } catch (e) {
+
+    console.log(`[${channelId}] force stop error:`, e.message);
+
+  }
 
 }
 

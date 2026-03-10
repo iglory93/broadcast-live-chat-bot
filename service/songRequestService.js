@@ -189,7 +189,6 @@ async function clearAll(channelId) {
 }
 
 module.exports = {
-  isManager,
   getConnectMessage,
   connectChannel,
   addRequest,

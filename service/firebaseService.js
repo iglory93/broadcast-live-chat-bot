@@ -13,17 +13,45 @@ const joinUnsubs = {};
 /* =========================
    채널 감시
 ========================= */
-async function watchChannels(onNewChannel) {
+// async function watchChannels(onNewChannel) {
+//   db.collection("channels").onSnapshot(snapshot => {
+//     const ids = [];
+
+//     snapshot.forEach(doc => {
+//       ids.push(String(doc.id));
+//     });
+//     //ids.push(2022)
+//     const newChannels = ids.filter(id => !channelCache.includes(id));
+
+//     newChannels.forEach(channelId => {
+//       console.log("새 채널 감지:", channelId);
+
+//       danceStore.primeScope(channelId);
+//       cleanStore.primeScope(channelId);
+
+//       if (onNewChannel) {
+//         onNewChannel(channelId);
+//       }
+//     });
+
+//     channelCache = ids;
+//   });
+// }
+async function watchChannels(onNewChannel, onRemoveChannel) {
+
   db.collection("channels").onSnapshot(snapshot => {
+
     const ids = [];
 
     snapshot.forEach(doc => {
       ids.push(String(doc.id));
     });
     //ids.push(2022)
+    /* 새 채널 */
     const newChannels = ids.filter(id => !channelCache.includes(id));
 
     newChannels.forEach(channelId => {
+
       console.log("새 채널 감지:", channelId);
 
       danceStore.primeScope(channelId);
@@ -32,10 +60,26 @@ async function watchChannels(onNewChannel) {
       if (onNewChannel) {
         onNewChannel(channelId);
       }
+
+    });
+
+    /* 삭제된 채널 */
+    const removedChannels = channelCache.filter(id => !ids.includes(id));
+
+    removedChannels.forEach(channelId => {
+
+      console.log("채널 제거 감지:", channelId);
+
+      if (onRemoveChannel) {
+        onRemoveChannel(channelId);
+      }
+
     });
 
     channelCache = ids;
+
   });
+
 }
 
 /* =========================
@@ -181,8 +225,8 @@ function getJoinMessage(channelId, userId) {
 /* =========================
    초기 시작
 ========================= */
-async function startFirebaseService(onNewChannel) {
-  await watchChannels(onNewChannel);
+async function startFirebaseService(onNewChannel, onRemoveChannel) {
+  await watchChannels(onNewChannel, onRemoveChannel);
   await watchCommands();
   await watchJoinMessages();
 
