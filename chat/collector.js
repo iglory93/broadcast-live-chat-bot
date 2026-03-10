@@ -546,6 +546,9 @@ async function startCollector(channelId, ownerNickname) {
 
       if (!message) return;
 
+      /* 🔥 stream 정보 가져오기 */
+      const streamInfo = streamStore.get(channelId);
+
       queue.push({
         type: "chat",
         channelId,
@@ -553,7 +556,9 @@ async function startCollector(channelId, ownerNickname) {
         nickname: data.member.nickname,
         role,
         message,
-        time: now
+        time: now,
+        broadcastId: streamInfo?.broadcastId || null,
+        streamId: streamInfo?.streamId || null
       });
     }
   });

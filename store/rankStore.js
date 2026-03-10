@@ -4,6 +4,7 @@ const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
 
 const AI_CHANNEL_ID = "999846";
 const FLUSH_INTERVAL_MS = 10 * 60 * 1000;
+//const FLUSH_INTERVAL_MS = 10 * 600;
 const liveLevelState = new Map();
 const pendingCounters = new Map();
 const liveChannelChatState = new Map();
@@ -215,6 +216,12 @@ async function flushPendingChats() {
         syncLevelStateAfterFlush(entry);
       }
     }
+    
+    //queryCache.clear();
+    queryCache.clearPrefix("rank");
+    queryCache.clearPrefix("levelRank");
+    queryCache.clearPrefix("broadcastRank");
+    queryCache.clearPrefix("chatSummary");
 
     console.log(`rankStore flush complete: ${entries.length} docs`);
     return { flushed: entries.length };
@@ -309,8 +316,9 @@ async function addChat(chat) {
     chatCount: 1,
     score
   };
-
+  //console.log("broadcast save:", chat.broadcastId, userId);
   if (chat.broadcastId) {
+    
     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
   }
 

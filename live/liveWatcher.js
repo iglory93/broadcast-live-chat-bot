@@ -319,7 +319,7 @@ function stopLiveWatcher(channelId) {
     danceManager.stop(channelId, "channel_removed");
 
     streamStore.remove(channelId);
-
+    
   } catch (e) {
 
     console.log(`[${channelId}] force stop error:`, e.message);
