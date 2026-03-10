@@ -6,6 +6,7 @@ const AI_CHANNEL_ID = "999846";
 const FLUSH_INTERVAL_MS = 10 * 60 * 1000;
 const liveLevelState = new Map();
 const pendingCounters = new Map();
+const liveChannelChatState = new Map();
 
 let flushTimer = null;
 let flushing = false;
@@ -323,6 +324,43 @@ async function addChat(chat) {
   return levelUpResult;
 }
 
+function makeChannelChatStateKey(channelId, userId) {
+  return `${toNumber(channelId)}::${toNumber(userId)}`;
+}
+
+async function getOrCreateChannelChatState(channelId, userId) {
+  const key = makeChannelChatStateKey(channelId, userId);
+  const cached = liveChannelChatState.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const docName = `channelTotal_${toNumber(channelId)}`;
+  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+  const snap = await docRef.get();
+  const base = snap.exists ? snap.data() : null;
+  const pending = getPendingEntry(docName, String(toNumber(userId)));
+  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+  const state = {
+    totalChatCount: toNumber(merged?.chatCount)
+  };
+
+  liveChannelChatState.set(key, state);
+  return state;
+}
+
+function buildChatMilestoneMessage(nickname, milestone) {
+  const name = nickname || "익명";
+
+  if (milestone >= 1000) {
+    return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 거의 전설급입니다!`;
+  }
+
+  return `🎉 ${name}님이 ${milestone}채팅 달성! 존재감이 아주 미쳤습니다 👏`;
+}
+
 function syncLevelStateAfterFlush(entry) {
   const key = String(entry.userId);
   const state = liveLevelState.get(key);
@@ -371,6 +409,67 @@ function sortRankingRows(rows) {
   return rows;
 }
 
+// async function getRanking({
+//   channelId,
+//   scope = "channel",
+//   period = "daily",
+//   limit = 5,
+//   dayKey,
+//   monthKey
+// }) {
+//   const cacheKey = [
+//     "rank",
+//     channelId,
+//     scope,
+//     period,
+//     limit,
+//     dayKey || "",
+//     monthKey || ""
+//   ];
+
+//   const cached = queryCache.get(cacheKey);
+//   if (cached) return cached;
+
+//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
+//   const ref = rootDoc(docName).collection("users");
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+//     }
+//   }
+
+//   const rows = sortRankingRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+//   return rows;
+// }
+
 async function getRanking({
   channelId,
   scope = "channel",
@@ -379,6 +478,7 @@ async function getRanking({
   dayKey,
   monthKey
 }) {
+
   const cacheKey = [
     "rank",
     channelId,
@@ -394,6 +494,7 @@ async function getRanking({
 
   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
   const ref = rootDoc(docName).collection("users");
+
   const fetchSize = Math.max(limit * 5, 50);
 
   const snap = await ref
@@ -404,21 +505,53 @@ async function getRanking({
 
   const mergedMap = new Map();
 
+  /* Firestore 데이터 */
   for (const doc of snap.docs) {
+
     const base = doc.data();
     const uid = String(toNumber(base.userId || doc.id));
+
     const pending = getPendingEntry(docName, uid);
 
-    mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+    mergedMap.set(
+      uid,
+      mergeBaseWithPending(base, pending, { saveLevel: false })
+    );
   }
 
+  /* pending 데이터 */
   const pendingEntries = getPendingEntriesByDocName(docName);
 
   for (const entry of pendingEntries) {
+
     const uid = String(entry.userId);
+
     if (!mergedMap.has(uid)) {
-      mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+      mergedMap.set(
+        uid,
+        mergeBaseWithPending(null, entry, { saveLevel: false })
+      );
     }
+  }
+
+  /* 🔥 Firestore 데이터가 하나도 없을 때도 pending으로 ranking 생성 */
+  if (mergedMap.size === 0 && pendingEntries.length > 0) {
+
+    const rows = sortRankingRows(
+      pendingEntries.map(e => ({
+        userId: e.userId,
+        chatCount: e.chatCount,
+        score: e.score
+      }))
+    )
+    .slice(0, limit)
+    .map((row, index) => ({
+      rank: index + 1,
+      ...row
+    }));
+
+    queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+    return rows;
   }
 
   const rows = sortRankingRows(Array.from(mergedMap.values()))
@@ -429,6 +562,7 @@ async function getRanking({
     }));
 
   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+
   return rows;
 }
 
