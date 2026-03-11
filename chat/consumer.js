@@ -119,7 +119,7 @@ function startConsumer() {
               console.log("attendance autoAttend error:", err.message);
             });
         }
-        console.log(chat)
+        //console.log(chat)
         rankStore.addChat(chat)
           .then(async (result) => {
             if (result?.levelUp) {
