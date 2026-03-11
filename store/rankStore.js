@@ -1,13 +1,15 @@
+// ===== store/rankStore.js =====
 const admin = require("firebase-admin");
 const db = require("../firebase");
 const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
-
+const CHAT_MILESTONE_UNIT = 100; // 운영은 100으로 변경
 const AI_CHANNEL_ID = "999846";
 const FLUSH_INTERVAL_MS = 10 * 60 * 1000;
 //const FLUSH_INTERVAL_MS = 10 * 600;
 const liveLevelState = new Map();
 const pendingCounters = new Map();
 const liveChannelChatState = new Map();
+const liveBroadcastChatState = new Map();
 
 let flushTimer = null;
 let flushing = false;
@@ -267,6 +269,7 @@ async function addChat(chat) {
   const channelId = toNumber(chat.channelId);
   const clientChannelId = toNumber(chat.clientChannelId);
   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
+  const nickname = String(chat.nickname || "").trim();
   const message = String(chat.message || "").trim();
 
   if (String(clientChannelId) === AI_CHANNEL_ID) {
@@ -293,20 +296,21 @@ async function addChat(chat) {
   const nextScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
   const nextLevel = getLevel(nextScore);
 
-  let levelUpResult = {
+  let result = {
     levelUp: false,
-    queued: true
+    queued: true,
+    chatMilestone: false
   };
 
   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
     levelState.announcedLevel = nextLevel;
 
-    levelUpResult = {
+    result = {
+      ...result,
       levelUp: true,
       prevLevel,
       nextLevel,
-      score: nextScore,
-      queued: true
+      score: nextScore
     };
   }
 
@@ -316,9 +320,8 @@ async function addChat(chat) {
     chatCount: 1,
     score
   };
-  //console.log("broadcast save:", chat.broadcastId, userId);
+
   if (chat.broadcastId) {
-    
     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
   }
 
@@ -329,11 +332,147 @@ async function addChat(chat) {
   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
 
-  return levelUpResult;
+  /* 방송 기준 100단위 축하 */
+  if (chat.broadcastId) {
+    const broadcastState = await getOrCreateBroadcastChatState(chat.broadcastId, userId);
+
+    const prevChatCount = toNumber(broadcastState.totalChatCount);
+    const nextChatCount = prevChatCount + 1;
+
+    broadcastState.totalChatCount = nextChatCount;
+
+    const prevMilestone = Math.floor(prevChatCount / CHAT_MILESTONE_UNIT);
+    const nextMilestone = Math.floor(nextChatCount / CHAT_MILESTONE_UNIT);
+
+    if (nextMilestone > prevMilestone && nextMilestone >= 1) {
+      const milestoneCount = nextMilestone * CHAT_MILESTONE_UNIT;
+
+      result = {
+        ...result,
+        chatMilestone: true,
+        milestoneCount,
+        message: buildChatMilestoneMessage(nickname, milestoneCount)
+      };
+    }
+  }
+
+  return result;
 }
+// async function addChat(chat) {
+//   ensureFlushScheduler();
+
+//   const channelId = toNumber(chat.channelId);
+//   const clientChannelId = toNumber(chat.clientChannelId);
+//   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
+//   const message = String(chat.message || "").trim();
+
+//   if (String(clientChannelId) === AI_CHANNEL_ID) {
+//     return { levelUp: false, queued: false };
+//   }
+
+//   if (!channelId || !userId || !message) {
+//     return { levelUp: false, queued: false };
+//   }
+
+//   const score = calcScore(message);
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   const levelState = await getOrCreateLevelState(userId, channelId);
+
+//   const prevScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+//   const prevLevel = getLevel(prevScore);
+
+//   levelState.pendingScore += score;
+//   levelState.pendingChatCount += 1;
+//   levelState.channelId = channelId;
+
+//   const nextScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+//   const nextLevel = getLevel(nextScore);
+
+//   const channelChatState = await getOrCreateChannelChatState(channelId, userId);
+//   channelChatState.totalChatCount = toNumber(channelChatState.totalChatCount) + 1;
+
+//   const milestone = channelChatState.totalChatCount;
+//   const isChatMilestone = milestone >= 100 && milestone % 100 === 0;
+
+//   let levelUpResult = {
+//     levelUp: false,
+//     queued: true,
+//     chatMilestone: false,
+//     milestone: 0,
+//     message: null
+//   };
+
+//   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
+//     levelState.announcedLevel = nextLevel;
+
+//     levelUpResult = {
+//       ...levelUpResult,
+//       levelUp: true,
+//       prevLevel,
+//       nextLevel,
+//       score: nextScore,
+//       queued: true
+//     };
+//   }
+
+//   if (isChatMilestone) {
+//     levelUpResult.chatMilestone = true;
+//     levelUpResult.milestone = milestone;
+//     levelUpResult.message = buildChatMilestoneMessage(chat.nickname, milestone);
+//   }
+
+//   const payload = {
+//     userId,
+//     channelId,
+//     chatCount: 1,
+//     score
+//   };
+//   //console.log("broadcast save:", chat.broadcastId, userId);
+//   if (chat.broadcastId) {
+    
+//     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
+//   }
+
+//   queueCounterUpdate(`channelDaily_${today}_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`channelMonthly_${month}_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
+
+//   return levelUpResult;
+// }
 
 function makeChannelChatStateKey(channelId, userId) {
   return `${toNumber(channelId)}::${toNumber(userId)}`;
+}
+function makeBroadcastChatStateKey(broadcastId, userId) {
+  return `${String(broadcastId)}::${toNumber(userId)}`;
+}
+
+async function getOrCreateBroadcastChatState(broadcastId, userId) {
+  const key = makeBroadcastChatStateKey(broadcastId, userId);
+  const cached = liveBroadcastChatState.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const docName = `broadcast_${String(broadcastId)}`;
+  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+  const snap = await docRef.get();
+  const base = snap.exists ? snap.data() : null;
+  const pending = getPendingEntry(docName, String(toNumber(userId)));
+  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+  const state = {
+    totalChatCount: toNumber(merged?.chatCount)
+  };
+
+  liveBroadcastChatState.set(key, state);
+  return state;
 }
 
 async function getOrCreateChannelChatState(channelId, userId) {
@@ -361,9 +500,9 @@ async function getOrCreateChannelChatState(channelId, userId) {
 
 function buildChatMilestoneMessage(nickname, milestone) {
   const name = nickname || "익명";
-
+  console.log(milestone)
   if (milestone >= 1000) {
-    return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 거의 전설급입니다!`;
+    return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 미쳐 날뛰고 있습니다!`;
   }
 
   return `🎉 ${name}님이 ${milestone}채팅 달성! 존재감이 아주 미쳤습니다 👏`;

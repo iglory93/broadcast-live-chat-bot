@@ -78,6 +78,7 @@ const rankStore = require("../store/rankStore");
 const sendChat = require("./sendChat");
 const profileCache = require("../store/profileCache");
 const attendanceStore = require("../store/attendanceStore");
+const { askMilestoneComment } = require("../ai/aiService");
 
 function startConsumer() {
   console.log("chat consumer 시작");
@@ -129,8 +130,26 @@ function startConsumer() {
               );
             }
 
-            if (result?.chatMilestone && result?.message) {
-              await sendChat(chat.channelId, result.message);
+            if (result?.chatMilestone) {
+              let milestoneMessage = null;
+
+              const useAiComment = Math.random() < 0.5;
+
+              if (useAiComment) {
+                milestoneMessage = await askMilestoneComment(
+                  chat.nickname,
+                  result.milestoneCount,
+                  chat.channelId
+                );
+              }
+
+              if (!milestoneMessage) {
+                milestoneMessage =
+                  result.message ||
+                  buildLocalMilestoneMessage(chat.nickname, result.milestoneCount);
+              }
+
+              await sendChat(chat.channelId, milestoneMessage);
             }
           })
           .catch(err => {
@@ -143,6 +162,39 @@ function startConsumer() {
       });
     }
   }, 20);
+}
+
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function buildLocalMilestoneMessage(name, milestone) {
+  const normalMessages = [
+    `🎉 ${name}님 ${milestone}채팅 달성! 오늘 키보드 폼 좋습니다 👏`,
+    `🥳 ${name}님 ${milestone}채팅 돌파! 존재감 확실하네요`,
+    `🔥 ${name}님 ${milestone}채팅 완료! 오늘 텐션 좋습니다`,
+    `💬 ${name}님 ${milestone}채팅 달성! 채팅창 고정멤버 인정`,
+    `✨ ${name}님 ${milestone}채팅 축하! 분위기 살리는 중입니다`,
+    `🎊 ${name}님 ${milestone}채팅 성공! 오늘 감 좋네요`,
+    `👏 ${name}님 ${milestone}채팅 달성! 손이 아주 바쁩니다`,
+    `🚀 ${name}님 ${milestone}채팅 돌파! 이 기세 좋습니다`,
+    `💖 ${name}님 ${milestone}채팅 감사합니다! 존재감 만점`,
+    `😎 ${name}님 ${milestone}채팅 완료! 오늘 활약이 좋습니다`
+  ];
+
+  const highMessages = [
+    `👑 ${name}님 ${milestone}채팅 달성! 오늘 채팅왕 분위기입니다`,
+    `🏆 ${name}님 ${milestone}채팅 돌파! 존재감이 레전드네요`,
+    `🔥 ${name}님 ${milestone}채팅! 채팅창 지분율이 미쳤습니다`,
+    `🎖 ${name}님 ${milestone}채팅 달성! 박수 크게 갑시다 👏`,
+    `💎 ${name}님 ${milestone}채팅 돌파! 오늘 진짜 폼 좋네요`
+  ];
+
+  if (milestone >= 1000) {
+    return pickRandom(highMessages);
+  }
+
+  return pickRandom(normalMessages);
 }
 
 module.exports = { startConsumer };

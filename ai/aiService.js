@@ -4,11 +4,14 @@ const { buildCommandContext } = require("./commandContext");
 const streamStore = require("../store/streamStore");
 const viewerStore = require("../store/viewerStore");
 const chatMemory = require("../store/chatMemoryStore");
+const aiConfigStore = require("../store/aiConfigStore");
 
 async function askAI(message, nickname, channelId, userId, type="chat") {
 
   try {
-
+    if (!aiConfigStore.isEnabled(channelId)) {
+      return null;
+    }
     const viewers = viewerStore.get(channelId) || [];
     const historyArr = chatMemory.get(channelId) || [];
     const history = historyArr.join("\n");
@@ -51,12 +54,6 @@ ${history}
 
     // 질문 분석
     let userQuestion = message;
-
-    if (type === "chat") {
-        // if (message.includes("최근") || message.includes("무슨 얘기")) {
-        //     userQuestion = "최근 채팅 내용을 방송 채팅처럼 요약해서 말해줘";
-        // }
-    }
 
     if (type === "gift") {
         userQuestion = `
@@ -161,7 +158,86 @@ ${commandText}
     return null;
 
   }
-
 }
 
-module.exports = { askAI };
+async function askMilestoneComment(nickname, milestone, channelId) {
+  try {
+    if (!aiConfigStore.isEnabled(channelId)) {
+      return null;
+    }
+
+    const stream = streamStore.get(channelId);
+
+    const systemPrompt = `
+너는 인터넷 방송 채팅방에서 활동하는 AI 채팅봇이다.
+
+# 방송정보
+- BJ: ${stream?.owner?.nickname || ""}
+- 방송제목: ${stream?.stream?.title || ""}
+- 현재 시청자: ${stream?.status?.performance?.viewerCount || 0}
+
+# 역할
+- 특정 시청자의 채팅 달성에 대해 짧은 감상평을 남긴다.
+- 축하 멘트보다는 "감상평", "한줄 코멘트" 느낌으로 말한다.
+- 방송 채팅처럼 자연스럽고 짧게 말한다.
+- 반드시 ${milestone} 이라는 숫자를 답변에 그대로 포함해야 한다.
+- 답변에 숫자 ${milestone}이 없으면 실패다.
+
+# 스타일
+- 최대 1문장
+- 40자 내외
+- 가끔 이모지 가능
+- 너무 과장하지 말고 재밌게
+- 한국어만 사용
+- 채팅 메시지만 출력
+`;
+
+    //const userPrompt = `${nickname}님이 ${milestone}채팅을 달성했다. 방송 채팅처럼 짧은 감상평 한 줄만 말해줘.`;
+    const userPrompt = `${nickname}님이 ${milestone}채팅을 달성했다. 반드시 ${milestone} 숫자를 그대로 넣어서 방송 채팅처럼 짧은 감상평 한 줄만 말해줘.`;
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${config.openRouteAiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt }
+        ]
+      })
+    });
+
+    const data = await res.json();
+
+    if (!data.choices) {
+      console.log("milestone AI error:", data);
+      return null;
+    }
+
+    let answer = data.choices[0].message.content || "";
+
+    answer = answer
+      .replace(/\n/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 80);
+
+    if (!answer) {
+      return null;
+    }
+
+    if (!answer.includes(String(milestone))) {
+      answer = `${nickname}님 ${milestone}채팅 달성, 오늘 손가락 폼 미쳤네요 😎`;
+    }
+
+    return `🤖 ${answer}`;
+  } catch (err) {
+    console.log("askMilestoneComment error:", err.message);
+    return null;
+  }
+}
+
+
+module.exports = { askAI, askMilestoneComment };

@@ -263,7 +263,7 @@ async function watcherLoop() {
 /**
  * watcher 시작
  */
-function startLiveWatcher(channelId) {
+async function startLiveWatcher(channelId) {
 
   channelId = String(channelId);
 
@@ -295,7 +295,7 @@ function startLiveWatcher(channelId) {
 //   delete channelState[channelId];
 
 // }
-function stopLiveWatcher(channelId) {
+async function stopLiveWatcher(channelId) {
 
   channelId = String(channelId);
 
@@ -306,8 +306,22 @@ function stopLiveWatcher(channelId) {
   console.log("liveWatcher 제거:", channelId);
 
   channels.delete(channelId);
+  const wasLive = streamStore.isLive(channelId);
+
+  try {
+
+    if (wasLive) {
+      await sendChat(channelId, "🫡 하리보 AI 퇴근합니다 충성!");
+    }
+
+  } catch (e) {
+
+    console.log(`[${channelId}] farewell send error:`, e.message);
+
+  }
 
   delete channelState[channelId];
+
 
   try {
 

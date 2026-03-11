@@ -1,3 +1,4 @@
+// ===== service/commandService.js =====
 const commandStore = require("../store/commandStore");
 const getWeather = require("../command/weather");
 const sendChat = require("../chat/sendChat");
@@ -15,6 +16,8 @@ const cleanStore = require("../store/cleanStore.js");
 const utils = require("../utils/util");
 const timerStore = require("../store/timerStore");
 const { getFortune } = require("../command/fortune");
+const aiConfigStore = require("../store/aiConfigStore");
+const noticeStore = require("../store/noticeStore");
 
 async function getNicknameMap(rows) {
   const ids = [...new Set(rows.map(row => String(row.userId)))];
@@ -139,6 +142,11 @@ async function handleCommand(chat) {
 
     console.log("AI 질문:", question);
 
+    if (!aiConfigStore.isEnabled(channelId)) {
+      await sendChat(channelId, "🤖 현재 이 방송의 AI 기능은 OFF 상태입니다.");
+      return;
+    }
+
     const userId = chat?.clientChannelId;
     const answer = await askAI(question, nickname, channelId, userId);
 
@@ -159,6 +167,197 @@ async function handleCommand(chat) {
 
   try {
     
+    /* AI켜기 */
+    if (command === "AI켜기") {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      await aiConfigStore.setEnabled(channelId, true);
+      aiConfigStore.primeScope(channelId);
+      await sendChat(channelId, "🤖 이 방송의 AI 기능을 ON으로 설정했습니다.");
+      return;
+    }
+
+    /* AI끄기 */
+    if (command === "AI끄기") {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      await aiConfigStore.setEnabled(channelId, false);
+      aiConfigStore.primeScope(channelId);
+      await sendChat(channelId, "🙈 이 방송의 AI 기능을 OFF로 설정했습니다.");
+      return;
+    }
+
+    /* AI상태 */
+    if (command === "AI상태") {
+      const status = aiConfigStore.getStatus(channelId);
+      await sendChat(channelId, `🤖 AI 기능 상태: ${status.enabled ? "ON" : "OFF"}`);
+      return;
+    }
+
+    /* 공지추가 */
+    if (command.startsWith("공지추가 ")) {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      const match = command.match(/^공지추가\s+(\d{1,3})\s+([^\s]+)\s+(.+)$/);
+
+      if (!match) {
+        await sendChat(channelId, `사용법: ${startStr}공지추가 5 점검안내 10분 후 재시작합니다`);
+        return;
+      }
+
+      const minute = Number(match[1]);
+      const title = String(match[2] || "").trim();
+      const body = String(match[3] || "").trim();
+
+      const current = noticeStore.listNotices(channelId);
+      let slot = 1;
+      while (slot <= 3 && current.find((item) => item.slot === slot)) {
+        slot += 1;
+      }
+
+      if (slot > 3) {
+        await sendChat(channelId, `공지 슬롯이 가득 찼습니다. ${startStr}공지삭제 1~3 후 다시 등록해주세요.`);
+        return;
+      }
+
+      try {
+        await noticeStore.setNotice(channelId, slot, minute, title, body);
+        noticeStore.primeScope(channelId);
+        await sendChat(channelId, `📢 공지 ${slot}번 등록 완료! ${minute}분마다 [${title}] 공지가 나갑니다.`);
+      } catch (err) {
+        if (err.message === "invalid_minute") {
+          await sendChat(channelId, "공지 분은 1~180 사이 정수만 가능합니다.");
+          return;
+        }
+
+        await sendChat(channelId, `공지 등록 실패: ${err.message}`);
+      }
+
+      return;
+    }
+
+    /* 공지삭제 */
+    if (command.startsWith("공지삭제 ")) {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      const parts = command.split(/\s+/).filter(Boolean);
+      const slot = Number(parts[1]);
+
+      if (!Number.isInteger(slot) || slot < 1 || slot > 3) {
+        await sendChat(channelId, `사용법: ${startStr}공지삭제 1`);
+        return;
+      }
+
+      await noticeStore.removeNotice(channelId, slot);
+      await sendChat(channelId, `🗑 공지 ${slot}번을 삭제했습니다.`);
+      return;
+    }
+
+    // /* 공지목록 */
+    // if (command.startsWith("공지목록")) {
+    //   const rows = noticeStore.listNotices(channelId);
+    //   const parts = command.split(/\s+/).filter(Boolean);
+    //   const slot = parts.length >= 2 ? Number(parts[1]) : null;
+
+    //   if (!rows.length) {
+    //     await sendChat(channelId, "등록된 공지가 없습니다.");
+    //     return;
+    //   }
+
+    //   if (slot) {
+    //     const item = rows.find((row) => row.slot === slot);
+
+    //     if (!item) {
+    //       await sendChat(channelId, `공지 ${slot}번은 비어 있습니다.`);
+    //       return;
+    //     }
+
+    //     await sendChat(channelId, `📋 공지 ${item.slot}번: ${item.minute}분 / ${item.title} / ${item.message}`);
+    //     return;
+    //   }
+
+    //   const text = rows
+    //     .map((row) => `${row.slot}. ${row.minute}분 / ${row.title} / ${row.message}`)
+    //     .join(" | ");
+
+    //   await sendChat(channelId, `📋 공지목록: ${text}`);
+    //   return;
+    // }
+    /* 공지목록 */
+    else if (command.startsWith("공지목록")) {
+      const parts = command.split(" ").filter(Boolean);
+      const notices = noticeStore.listNotices(channelId) || [];
+
+      const slotMap = {};
+      notices.forEach((item) => {
+        slotMap[Number(item.slot)] = item;
+      });
+
+      const emojiMap = {
+        1: "1️⃣",
+        2: "2️⃣",
+        3: "3️⃣"
+      };
+
+      // #공지목록 1 ~ #공지목록 3 개별 조회
+      if (parts.length >= 2) {
+        const slot = Number(parts[1]);
+
+        if (![1, 2, 3].includes(slot)) {
+          await sendChat(channelId, `사용법: ${startStr}공지목록 또는 ${startStr}공지목록 1`);
+          return;
+        }
+
+        const item = slotMap[slot];
+
+        if (!item) {
+          await sendChat(channelId, `📢 공지 ${slot}번은 비어있습니다.`);
+          return;
+        }
+
+        const msg =
+    `${emojiMap[slot]} 공지 ${slot}번
+    ⏱ 주기: ${item.minute}분
+    🏷 제목: ${item.title}
+    📝 내용: ${item.message}`;
+
+        await sendChat(channelId, msg);
+        return;
+      }
+
+      // 전체 목록 조회
+      const lines = ["📢 공지 목록"];
+
+      for (let slot = 1; slot <= 3; slot += 1) {
+        const item = slotMap[slot];
+
+        if (!item) {
+          lines.push(`${emojiMap[slot]} 비어있음`);
+          continue;
+        }
+
+        lines.push(
+          `${emojiMap[slot]} ${item.minute}분 | [${item.title}]`,
+          `   ${item.message}`
+        );
+      }
+
+      await sendChat(channelId, lines.join("\n"));
+      return;
+    }
+
     /* 댄스시작 */
     if (command.startsWith("댄스시작")) {
       const parts = command.split(/\s+/).filter(Boolean);
@@ -1364,3 +1563,4 @@ function getDateKey(offsetDays = 0) {
 }
 
 module.exports = { handleCommand };
+

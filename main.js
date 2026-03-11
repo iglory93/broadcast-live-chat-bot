@@ -36,13 +36,13 @@ async function start() {
     // });
 
     await firebaseService.startFirebaseService(
-      (channelId) => {
+      async (channelId) => {
         console.log("채널 자동 연결:", channelId);
-        startLiveWatcher(channelId);
+        await startLiveWatcher(channelId);
       },
-      (channelId) => {
+      async (channelId) => {
         console.log("채널 자동 제거:", channelId);
-        stopLiveWatcher(channelId);
+        await stopLiveWatcher(channelId);
       }
     );
     startConsole();
