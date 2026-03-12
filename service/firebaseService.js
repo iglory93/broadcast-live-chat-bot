@@ -296,10 +296,10 @@ async function watchChannels(onNewChannel, onRemoveChannel) {
 
     const ids = [];
 
-    // snapshot.forEach(doc => {
-    //   ids.push(String(doc.id));
-    // });
-    ids.push(2022)
+    snapshot.forEach(doc => {
+      ids.push(String(doc.id));
+    });
+    //ids.push(2022)
     /* 새 채널 */
     const newChannels = ids.filter(id => !channelCache.includes(id));
 
