@@ -209,10 +209,10 @@ async function handleCommand(chat) {
         return;
       }
 
-      const match = command.match(/^공지추가\s+(\d{1,3})\s+([^\s]+)\s+(.+)$/);
-
+      // const match = command.match(/^공지추가\s+(\d{1,3})\s+([^\s]+)\s+(.+)$/);
+      const match = command.match(/^공지추가\s+(\d{1,3})\s+([^\s]+)\s+([\s\S]+)$/);
       if (!match) {
-        await sendChat(channelId, `사용법: ${startStr}공지추가 5 점검안내 10분 후 재시작합니다`);
+        await sendChat(channelId, `사용법: ${startStr}공지추가 {반복시간(분)} {공지제목} {공지내용}`);
         return;
       }
 
@@ -429,17 +429,49 @@ async function handleCommand(chat) {
     }
 
     /* 댄스관리 */
+    // else if (command.startsWith("댄스관리 ")) {
+    //   if (utils.isManager(chat, channelId)) {
+    //     const parts = command.split(/\s+/);
+
+    //     if (parts.length < 3) {
+    //       await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
+    //       return;
+    //     }
+
+    //     const slot = Number(parts[1]);
+    //     const messageText = parts.slice(2).join(" ").trim();
+
+    //     if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
+    //       await sendChat(channelId, "댄스 슬롯은 1~10만 가능합니다.");
+    //       return;
+    //     }
+
+    //     if (!messageText) {
+    //       await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
+    //       return;
+    //     }
+
+    //     await danceStore.setMessage(channelId, slot, messageText);
+    //     danceStore.primeScope(channelId);
+    //     await sendChat(channelId, `✅ 채널 댄스 루틴 등록: ${slot}번`);
+    //   } else {
+    //     await sendChat(channelId, "명령어 추가 권한 없음");
+    //   }
+
+    //   return;
+    // }
+
     else if (command.startsWith("댄스관리 ")) {
       if (utils.isManager(chat, channelId)) {
-        const parts = command.split(/\s+/);
+        const match = command.match(/^댄스관리\s+(\d+)\s+([\s\S]+)$/);
 
-        if (parts.length < 3) {
+        if (!match) {
           await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
           return;
         }
 
-        const slot = Number(parts[1]);
-        const messageText = parts.slice(2).join(" ").trim();
+        const slot = Number(match[1]);
+        const messageText = String(match[2] || "").trim();
 
         if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
           await sendChat(channelId, "댄스 슬롯은 1~10만 가능합니다.");
@@ -460,7 +492,6 @@ async function handleCommand(chat) {
 
       return;
     }
-
     /* 댄스관리삭제 */
     else if (command.startsWith("댄스관리삭제 ")) {
       const master = String(chat?.clientChannelId);
@@ -539,6 +570,23 @@ async function handleCommand(chat) {
     }
 
     /* 댄스목록 */
+    // else if (command === "댄스목록") {
+    //   const routine = danceStore.getMergedRoutine(channelId);
+
+    //   if (!routine.length) {
+    //     await sendChat(channelId, "등록된 댄스 루틴이 없습니다.");
+    //     return;
+    //   }
+
+    //   const msg = ["💃 현재 댄스 루틴"];
+
+    //   routine.forEach(row => {
+    //     msg.push(`${row.slot}. ${row.message}`);
+    //   });
+
+    //   await sendChat(channelId, msg.join("\n"));
+    //   return;
+    // }
     else if (command === "댄스목록") {
       const routine = danceStore.getMergedRoutine(channelId);
 
@@ -547,10 +595,20 @@ async function handleCommand(chat) {
         return;
       }
 
-      const msg = ["💃 현재 댄스 루틴"];
+      const msg = ["💃 현재 댄스 루틴", ""];
 
-      routine.forEach(row => {
-        msg.push(`${row.slot}. ${row.message}`);
+      routine.forEach((row, index) => {
+        const text = String(row.message || "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .trim();
+
+        msg.push(`【${row.slot}번】`);
+        msg.push(text);
+
+        if (index < routine.length - 1) {
+          msg.push("");
+        }
       });
 
       await sendChat(channelId, msg.join("\n"));
