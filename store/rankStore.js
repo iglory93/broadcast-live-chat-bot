@@ -1,11 +1,941 @@
-// ===== store/rankStore.js =====
+// // ===== store/rankStore.js =====
+// const admin = require("firebase-admin");
+// const db = require("../firebase");
+// const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
+// const CHAT_MILESTONE_UNIT = 100; // 운영은 100으로 변경
+// const AI_CHANNEL_ID = "999846";
+// const FLUSH_INTERVAL_MS = 10 * 60 * 1000;
+// //const FLUSH_INTERVAL_MS = 10 * 600;
+// const liveLevelState = new Map();
+// const pendingCounters = new Map();
+// const liveChannelChatState = new Map();
+// const liveBroadcastChatState = new Map();
+
+// let flushTimer = null;
+// let flushing = false;
+// let shuttingDown = false;
+
+// const queryCache = require("./queryCache");
+
+// const RANK_CACHE_TTL_MS = 5000;
+// const SUMMARY_CACHE_TTL_MS = 5000;
+
+// function getKstDate(offsetDays = 0) {
+//   const now = new Date();
+//   const kst = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+//   kst.setUTCDate(kst.getUTCDate() + offsetDays);
+//   return kst;
+// }
+
+// function pad(n) {
+//   return String(n).padStart(2, "0");
+// }
+
+// function getTodayKey(offsetDays = 0) {
+//   const d = getKstDate(offsetDays);
+//   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+// }
+
+// function getMonthKey(offsetMonths = 0) {
+//   const d = getKstDate(0);
+//   d.setUTCMonth(d.getUTCMonth() + offsetMonths);
+//   return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}`;
+// }
+
+// function rootDoc(name) {
+//   return db.collection("chatRank").doc(name);
+// }
+
+// function toNumber(value) {
+//   const n = Number(value);
+//   return Number.isFinite(n) ? n : 0;
+// }
+
+// function ensureFlushScheduler() {
+//   if (flushTimer) return;
+
+//   flushTimer = setInterval(() => {
+//     flushPendingChats().catch((err) => {
+//       console.error("rankStore flush error:", err);
+//     });
+//   }, FLUSH_INTERVAL_MS);
+
+//   if (typeof flushTimer.unref === "function") {
+//     flushTimer.unref();
+//   }
+// }
+
+// function stopFlushScheduler() {
+//   if (!flushTimer) return;
+//   clearInterval(flushTimer);
+//   flushTimer = null;
+// }
+
+// function makePendingKey(name, userId) {
+//   return `${name}::${userId}`;
+// }
+
+// function queueCounterUpdate(name, userId, payload, options = {}) {
+//   const key = makePendingKey(name, userId);
+//   const existing = pendingCounters.get(key);
+
+//   if (existing) {
+//     existing.chatCount += toNumber(payload.chatCount);
+//     existing.score += toNumber(payload.score);
+//     existing.saveLevel = existing.saveLevel || !!options.saveLevel;
+//     existing.channelId = toNumber(payload.channelId) || existing.channelId;
+//     return;
+//   }
+
+//   pendingCounters.set(key, {
+//     key,
+//     docName: name,
+//     userId: toNumber(payload.userId),
+//     channelId: toNumber(payload.channelId),
+//     chatCount: toNumber(payload.chatCount),
+//     score: toNumber(payload.score),
+//     saveLevel: !!options.saveLevel,
+//     docRef: rootDoc(name).collection("users").doc(String(userId))
+//   });
+// }
+
+// function getPendingEntry(docName, userId) {
+//   return pendingCounters.get(makePendingKey(docName, userId)) || null;
+// }
+
+// function getPendingEntriesByDocName(docName) {
+//   const rows = [];
+
+//   for (const entry of pendingCounters.values()) {
+//     if (entry.docName === docName) {
+//       rows.push(entry);
+//     }
+//   }
+
+//   return rows;
+// }
+
+// function mergeBaseWithPending(base, pending, options = {}) {
+//   const current = base ? { ...base } : null;
+
+//   if (!pending) {
+//     if (!current) return null;
+
+//     if (options.saveLevel) {
+//       const score = toNumber(current.score);
+//       const level = toNumber(current.level || getLevel(score));
+//       return {
+//         ...current,
+//         score,
+//         chatCount: toNumber(current.chatCount),
+//         level,
+//         nextLevelScore: toNumber(current.nextLevelScore || getNextLevelScore(level))
+//       };
+//     }
+
+//     return {
+//       ...current,
+//       score: toNumber(current.score),
+//       chatCount: toNumber(current.chatCount)
+//     };
+//   }
+
+//   const nextUserId = toNumber(current?.userId || pending.userId);
+//   const nextChannelId = toNumber(current?.channelId || pending.channelId);
+//   const nextChatCount = toNumber(current?.chatCount) + toNumber(pending.chatCount);
+//   const nextScore = toNumber(current?.score) + toNumber(pending.score);
+
+//   const merged = {
+//     ...(current || {}),
+//     userId: nextUserId,
+//     channelId: nextChannelId,
+//     chatCount: nextChatCount,
+//     score: nextScore,
+//     _pending: true
+//   };
+
+//   if (options.saveLevel) {
+//     const nextLevel = getLevel(nextScore);
+//     merged.level = nextLevel;
+//     merged.nextLevelScore = getNextLevelScore(nextLevel);
+//   } else if (current?.level != null) {
+//     merged.level = current.level;
+//     merged.nextLevelScore = current.nextLevelScore;
+//   }
+
+//   return merged;
+// }
+
+// async function flushPendingChats() {
+//   if (flushing || pendingCounters.size === 0) {
+//     return { flushed: 0 };
+//   }
+
+//   flushing = true;
+
+//   const entries = Array.from(pendingCounters.values());
+//   pendingCounters.clear();
+
+//   try {
+//     const writer = db.bulkWriter();
+//     const now = admin.firestore.FieldValue.serverTimestamp();
+
+//     for (const entry of entries) {
+//       let data = {
+//         userId: entry.userId,
+//         channelId: entry.channelId,
+//         chatCount: admin.firestore.FieldValue.increment(entry.chatCount),
+//         score: admin.firestore.FieldValue.increment(entry.score),
+//         updatedAt: now,
+//         lastMessageAt: now
+//       };
+
+//       if (entry.saveLevel) {
+//         const snap = await entry.docRef.get();
+//         const prev = snap.exists ? snap.data() : {};
+
+//         const nextScore = toNumber(prev.score) + toNumber(entry.score);
+//         const prevLevel = toNumber(prev.level || getLevel(toNumber(prev.score)));
+//         const nextLevel = getLevel(nextScore);
+
+//         data.level = nextLevel;
+//         data.nextLevelScore = getNextLevelScore(nextLevel);
+
+//         if (nextLevel > prevLevel) {
+//           data.lastLevelUpAt = now;
+//         } else if (prev.lastLevelUpAt) {
+//           data.lastLevelUpAt = prev.lastLevelUpAt;
+//         }
+//       }
+
+//       writer.set(entry.docRef, data, { merge: true });
+//     }
+
+//     await writer.close();
+//     /* 여기서 메모리 상태 정리 */
+//     for (const entry of entries) {
+//       if (entry.saveLevel) {
+//         syncLevelStateAfterFlush(entry);
+//       }
+//     }
+    
+//     //queryCache.clear();
+//     queryCache.clearPrefix("rank");
+//     queryCache.clearPrefix("levelRank");
+//     queryCache.clearPrefix("broadcastRank");
+//     queryCache.clearPrefix("chatSummary");
+
+//     console.log(`rankStore flush complete: ${entries.length} docs`);
+//     return { flushed: entries.length };
+//   } catch (err) {
+//     for (const entry of entries) {
+//       const existing = pendingCounters.get(entry.key);
+
+//       if (existing) {
+//         existing.chatCount += entry.chatCount;
+//         existing.score += entry.score;
+//         existing.saveLevel = existing.saveLevel || entry.saveLevel;
+//       } else {
+//         pendingCounters.set(entry.key, entry);
+//       }
+//     }
+
+//     throw err;
+//   } finally {
+//     flushing = false;
+//   }
+// }
+
+// async function shutdown() {
+//   if (shuttingDown) return;
+
+//   shuttingDown = true;
+//   stopFlushScheduler();
+
+//   try {
+//     if (pendingCounters.size > 0) {
+//       console.log("rankStore shutdown flush start...");
+//       await flushPendingChats();
+//       console.log("rankStore shutdown flush done");
+//     }
+//   } catch (err) {
+//     console.error("rankStore shutdown flush error:", err);
+//   }
+// }
+
+// async function addChat(chat) {
+//   ensureFlushScheduler();
+
+//   const channelId = toNumber(chat.channelId);
+//   const clientChannelId = toNumber(chat.clientChannelId);
+//   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
+//   const nickname = String(chat.nickname || "").trim();
+//   const message = String(chat.message || "").trim();
+
+//   if (String(clientChannelId) === AI_CHANNEL_ID) {
+//     return { levelUp: false, queued: false };
+//   }
+
+//   if (!channelId || !userId || !message) {
+//     return { levelUp: false, queued: false };
+//   }
+
+//   const score = calcScore(message);
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   const levelState = await getOrCreateLevelState(userId, channelId);
+
+//   const prevScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+//   const prevLevel = getLevel(prevScore);
+
+//   levelState.pendingScore += score;
+//   levelState.pendingChatCount += 1;
+//   levelState.channelId = channelId;
+
+//   const nextScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+//   const nextLevel = getLevel(nextScore);
+
+//   let result = {
+//     levelUp: false,
+//     queued: true,
+//     chatMilestone: false
+//   };
+
+//   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
+//     levelState.announcedLevel = nextLevel;
+
+//     result = {
+//       ...result,
+//       levelUp: true,
+//       prevLevel,
+//       nextLevel,
+//       score: nextScore
+//     };
+//   }
+
+//   const payload = {
+//     userId,
+//     channelId,
+//     chatCount: 1,
+//     score
+//   };
+
+//   if (chat.broadcastId) {
+//     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
+//   }
+
+//   queueCounterUpdate(`channelDaily_${today}_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`channelMonthly_${month}_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
+//   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
+
+//   /* 방송 기준 100단위 축하 */
+//   if (chat.broadcastId) {
+//     const broadcastState = await getOrCreateBroadcastChatState(chat.broadcastId, userId);
+
+//     const prevChatCount = toNumber(broadcastState.totalChatCount);
+//     const nextChatCount = prevChatCount + 1;
+
+//     broadcastState.totalChatCount = nextChatCount;
+
+//     const prevMilestone = Math.floor(prevChatCount / CHAT_MILESTONE_UNIT);
+//     const nextMilestone = Math.floor(nextChatCount / CHAT_MILESTONE_UNIT);
+
+//     if (nextMilestone > prevMilestone && nextMilestone >= 1) {
+//       const milestoneCount = nextMilestone * CHAT_MILESTONE_UNIT;
+
+//       result = {
+//         ...result,
+//         chatMilestone: true,
+//         milestoneCount,
+//         message: buildChatMilestoneMessage(nickname, milestoneCount)
+//       };
+//     }
+//   }
+
+//   return result;
+// }
+// // async function addChat(chat) {
+// //   ensureFlushScheduler();
+
+// //   const channelId = toNumber(chat.channelId);
+// //   const clientChannelId = toNumber(chat.clientChannelId);
+// //   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
+// //   const message = String(chat.message || "").trim();
+
+// //   if (String(clientChannelId) === AI_CHANNEL_ID) {
+// //     return { levelUp: false, queued: false };
+// //   }
+
+// //   if (!channelId || !userId || !message) {
+// //     return { levelUp: false, queued: false };
+// //   }
+
+// //   const score = calcScore(message);
+// //   const today = getTodayKey();
+// //   const month = getMonthKey();
+
+// //   const levelState = await getOrCreateLevelState(userId, channelId);
+
+// //   const prevScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+// //   const prevLevel = getLevel(prevScore);
+
+// //   levelState.pendingScore += score;
+// //   levelState.pendingChatCount += 1;
+// //   levelState.channelId = channelId;
+
+// //   const nextScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
+// //   const nextLevel = getLevel(nextScore);
+
+// //   const channelChatState = await getOrCreateChannelChatState(channelId, userId);
+// //   channelChatState.totalChatCount = toNumber(channelChatState.totalChatCount) + 1;
+
+// //   const milestone = channelChatState.totalChatCount;
+// //   const isChatMilestone = milestone >= 100 && milestone % 100 === 0;
+
+// //   let levelUpResult = {
+// //     levelUp: false,
+// //     queued: true,
+// //     chatMilestone: false,
+// //     milestone: 0,
+// //     message: null
+// //   };
+
+// //   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
+// //     levelState.announcedLevel = nextLevel;
+
+// //     levelUpResult = {
+// //       ...levelUpResult,
+// //       levelUp: true,
+// //       prevLevel,
+// //       nextLevel,
+// //       score: nextScore,
+// //       queued: true
+// //     };
+// //   }
+
+// //   if (isChatMilestone) {
+// //     levelUpResult.chatMilestone = true;
+// //     levelUpResult.milestone = milestone;
+// //     levelUpResult.message = buildChatMilestoneMessage(chat.nickname, milestone);
+// //   }
+
+// //   const payload = {
+// //     userId,
+// //     channelId,
+// //     chatCount: 1,
+// //     score
+// //   };
+// //   //console.log("broadcast save:", chat.broadcastId, userId);
+// //   if (chat.broadcastId) {
+    
+// //     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
+// //   }
+
+// //   queueCounterUpdate(`channelDaily_${today}_${channelId}`, userId, payload, { saveLevel: false });
+// //   queueCounterUpdate(`channelMonthly_${month}_${channelId}`, userId, payload, { saveLevel: false });
+// //   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
+// //   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
+// //   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
+// //   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
+
+// //   return levelUpResult;
+// // }
+
+// function makeChannelChatStateKey(channelId, userId) {
+//   return `${toNumber(channelId)}::${toNumber(userId)}`;
+// }
+// function makeBroadcastChatStateKey(broadcastId, userId) {
+//   return `${String(broadcastId)}::${toNumber(userId)}`;
+// }
+
+// async function getOrCreateBroadcastChatState(broadcastId, userId) {
+//   const key = makeBroadcastChatStateKey(broadcastId, userId);
+//   const cached = liveBroadcastChatState.get(key);
+
+//   if (cached) {
+//     return cached;
+//   }
+
+//   const docName = `broadcast_${String(broadcastId)}`;
+//   const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+//   const snap = await docRef.get();
+//   const base = snap.exists ? snap.data() : null;
+//   const pending = getPendingEntry(docName, String(toNumber(userId)));
+//   const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+//   const state = {
+//     totalChatCount: toNumber(merged?.chatCount)
+//   };
+
+//   liveBroadcastChatState.set(key, state);
+//   return state;
+// }
+
+// async function getOrCreateChannelChatState(channelId, userId) {
+//   const key = makeChannelChatStateKey(channelId, userId);
+//   const cached = liveChannelChatState.get(key);
+
+//   if (cached) {
+//     return cached;
+//   }
+
+//   const docName = `channelTotal_${toNumber(channelId)}`;
+//   const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+//   const snap = await docRef.get();
+//   const base = snap.exists ? snap.data() : null;
+//   const pending = getPendingEntry(docName, String(toNumber(userId)));
+//   const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+//   const state = {
+//     totalChatCount: toNumber(merged?.chatCount)
+//   };
+
+//   liveChannelChatState.set(key, state);
+//   return state;
+// }
+
+// function buildChatMilestoneMessage(nickname, milestone) {
+//   const name = nickname || "익명";
+//   console.log(milestone)
+//   if (milestone >= 1000) {
+//     return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 미쳐 날뛰고 있습니다!`;
+//   }
+
+//   return `🎉 ${name}님이 ${milestone}채팅 달성! 존재감이 아주 미쳤습니다 👏`;
+// }
+
+// function syncLevelStateAfterFlush(entry) {
+//   const key = String(entry.userId);
+//   const state = liveLevelState.get(key);
+//   if (!state) return;
+
+//   state.baseScore += toNumber(entry.score);
+//   state.pendingScore = Math.max(0, toNumber(state.pendingScore) - toNumber(entry.score));
+//   state.pendingChatCount = Math.max(0, toNumber(state.pendingChatCount) - toNumber(entry.chatCount));
+//   state.announcedLevel = getLevel(state.baseScore);
+// }
+// function getRankDocName({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
+//   const today = dayKey || getTodayKey(0);
+//   const month = monthKey || getMonthKey(0);
+
+//   if (scope === "global") {
+//     if (period === "daily") return `globalDaily_${today}`;
+//     if (period === "monthly") return `globalMonthly_${month}`;
+//     if (period === "total") return `globalTotal`;
+//   }
+
+//   const cid = toNumber(channelId);
+
+//   if (period === "daily") return `channelDaily_${today}_${cid}`;
+//   if (period === "monthly") return `channelMonthly_${month}_${cid}`;
+//   if (period === "total") return `channelTotal_${cid}`;
+
+//   return `channelDaily_${today}_${cid}`;
+// }
+
+// function getRankRef({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
+//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
+//   return rootDoc(docName).collection("users");
+// }
+
+// function sortRankingRows(rows) {
+//   rows.sort((a, b) => {
+//     const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
+//     if (chatDiff !== 0) return chatDiff;
+
+//     const scoreDiff = toNumber(b.score) - toNumber(a.score);
+//     if (scoreDiff !== 0) return scoreDiff;
+
+//     return toNumber(a.userId) - toNumber(b.userId);
+//   });
+
+//   return rows;
+// }
+
+// // async function getRanking({
+// //   channelId,
+// //   scope = "channel",
+// //   period = "daily",
+// //   limit = 5,
+// //   dayKey,
+// //   monthKey
+// // }) {
+// //   const cacheKey = [
+// //     "rank",
+// //     channelId,
+// //     scope,
+// //     period,
+// //     limit,
+// //     dayKey || "",
+// //     monthKey || ""
+// //   ];
+
+// //   const cached = queryCache.get(cacheKey);
+// //   if (cached) return cached;
+
+// //   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
+// //   const ref = rootDoc(docName).collection("users");
+// //   const fetchSize = Math.max(limit * 5, 50);
+
+// //   const snap = await ref
+// //     .orderBy("chatCount", "desc")
+// //     .orderBy("score", "desc")
+// //     .limit(fetchSize)
+// //     .get();
+
+// //   const mergedMap = new Map();
+
+// //   for (const doc of snap.docs) {
+// //     const base = doc.data();
+// //     const uid = String(toNumber(base.userId || doc.id));
+// //     const pending = getPendingEntry(docName, uid);
+
+// //     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+// //   }
+
+// //   const pendingEntries = getPendingEntriesByDocName(docName);
+
+// //   for (const entry of pendingEntries) {
+// //     const uid = String(entry.userId);
+// //     if (!mergedMap.has(uid)) {
+// //       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+// //     }
+// //   }
+
+// //   const rows = sortRankingRows(Array.from(mergedMap.values()))
+// //     .slice(0, limit)
+// //     .map((row, index) => ({
+// //       rank: index + 1,
+// //       ...row
+// //     }));
+
+// //   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+// //   return rows;
+// // }
+
+// async function getRanking({
+//   channelId,
+//   scope = "channel",
+//   period = "daily",
+//   limit = 5,
+//   dayKey,
+//   monthKey
+// }) {
+
+//   const cacheKey = [
+//     "rank",
+//     channelId,
+//     scope,
+//     period,
+//     limit,
+//     dayKey || "",
+//     monthKey || ""
+//   ];
+
+//   const cached = queryCache.get(cacheKey);
+//   if (cached) return cached;
+
+//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
+//   const ref = rootDoc(docName).collection("users");
+
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   /* Firestore 데이터 */
+//   for (const doc of snap.docs) {
+
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(
+//       uid,
+//       mergeBaseWithPending(base, pending, { saveLevel: false })
+//     );
+//   }
+
+//   /* pending 데이터 */
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+
+//     const uid = String(entry.userId);
+
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(
+//         uid,
+//         mergeBaseWithPending(null, entry, { saveLevel: false })
+//       );
+//     }
+//   }
+
+//   /* 🔥 Firestore 데이터가 하나도 없을 때도 pending으로 ranking 생성 */
+//   if (mergedMap.size === 0 && pendingEntries.length > 0) {
+
+//     const rows = sortRankingRows(
+//       pendingEntries.map(e => ({
+//         userId: e.userId,
+//         chatCount: e.chatCount,
+//         score: e.score
+//       }))
+//     )
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//     queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+//     return rows;
+//   }
+
+//   const rows = sortRankingRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+
+//   return rows;
+// }
+
+// function sortLevelRows(rows) {
+//   rows.sort((a, b) => {
+//     const levelDiff = toNumber(b.level) - toNumber(a.level);
+//     if (levelDiff !== 0) return levelDiff;
+
+//     const scoreDiff = toNumber(b.score) - toNumber(a.score);
+//     if (scoreDiff !== 0) return scoreDiff;
+
+//     const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
+//     if (chatDiff !== 0) return chatDiff;
+
+//     return toNumber(a.userId) - toNumber(b.userId);
+//   });
+
+//   return rows;
+// }
+
+// async function getLevelRanking(limit = 5) {
+//   const cacheKey = ["levelRank", limit];
+//   const cached = queryCache.get(cacheKey);
+//   if (cached) return cached;
+
+//   const docName = "globalTotal";
+//   const ref = rootDoc(docName).collection("users");
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("level", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: true }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: true }));
+//     }
+//   }
+
+//   const rows = sortLevelRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+//   return rows;
+// }
+
+// async function getUserLevel(userId) {
+//   const uid = String(toNumber(userId));
+//   const docName = "globalTotal";
+//   const ref = rootDoc(docName).collection("users").doc(uid);
+
+//   const snap = await ref.get();
+//   const base = snap.exists ? snap.data() : null;
+//   const pending = getPendingEntry(docName, uid);
+//   const merged = mergeBaseWithPending(base, pending, { saveLevel: true });
+
+//   return merged || null;
+// }
+
+// async function getDocData(docRef, docName, userId, options = {}) {
+//   const snap = await docRef.get();
+//   const base = snap.exists ? snap.data() : null;
+//   const pending = getPendingEntry(docName, String(toNumber(userId)));
+
+//   return mergeBaseWithPending(base, pending, options);
+// }
+
+// async function getUserChatSummary(channelId, userId) {
+//   const cid = toNumber(channelId);
+//   const uid = toNumber(userId);
+
+//   const cacheKey = ["chatSummary", cid, uid];
+//   const cached = queryCache.get(cacheKey);
+//   if (cached) return cached;
+
+//   const today = getTodayKey();
+//   const month = getMonthKey();
+
+//   const channelDailyName = `channelDaily_${today}_${cid}`;
+//   const channelMonthlyName = `channelMonthly_${month}_${cid}`;
+//   const channelTotalName = `channelTotal_${cid}`;
+//   const globalDailyName = `globalDaily_${today}`;
+//   const globalMonthlyName = `globalMonthly_${month}`;
+//   const globalTotalName = `globalTotal`;
+
+//   const [
+//     channelDaily,
+//     channelMonthly,
+//     channelTotal,
+//     globalDaily,
+//     globalMonthly,
+//     globalTotal
+//   ] = await Promise.all([
+//     getDocData(rootDoc(channelDailyName).collection("users").doc(String(uid)), channelDailyName, uid),
+//     getDocData(rootDoc(channelMonthlyName).collection("users").doc(String(uid)), channelMonthlyName, uid),
+//     getDocData(rootDoc(channelTotalName).collection("users").doc(String(uid)), channelTotalName, uid),
+//     getDocData(rootDoc(globalDailyName).collection("users").doc(String(uid)), globalDailyName, uid),
+//     getDocData(rootDoc(globalMonthlyName).collection("users").doc(String(uid)), globalMonthlyName, uid),
+//     getDocData(rootDoc(globalTotalName).collection("users").doc(String(uid)), globalTotalName, uid, { saveLevel: true })
+//   ]);
+
+//   const result = {
+//     userId: uid,
+//     channelId: cid,
+//     channelDaily,
+//     channelMonthly,
+//     channelTotal,
+//     globalDaily,
+//     globalMonthly,
+//     globalTotal
+//   };
+
+//   queryCache.set(cacheKey, result, SUMMARY_CACHE_TTL_MS);
+//   return result;
+// }
+
+// async function getOrCreateLevelState(userId, channelId) {
+//   const key = String(userId);
+//   const cached = liveLevelState.get(key);
+//   if (cached) return cached;
+
+//   const ref = rootDoc("globalTotal").collection("users").doc(key);
+//   const snap = await ref.get();
+//   const base = snap.exists ? snap.data() : {};
+
+//   const state = {
+//     userId: Number(userId),
+//     channelId: Number(channelId),
+//     baseScore: toNumber(base.score),
+//     pendingScore: 0,
+//     pendingChatCount: 0,
+//     announcedLevel: toNumber(base.level || getLevel(toNumber(base.score)))
+//   };
+
+//   liveLevelState.set(key, state);
+//   return state;
+// }
+
+// async function getBroadcastRanking(broadcastId, limit = 5) {
+//   const cacheKey = ["broadcastRank", broadcastId, limit];
+//   const cached = queryCache.get(cacheKey);
+//   if (cached) return cached;
+
+//   const docName = `broadcast_${broadcastId}`;
+//   const ref = rootDoc(docName).collection("users");
+//   const fetchSize = Math.max(limit * 5, 50);
+
+//   const snap = await ref
+//     .orderBy("chatCount", "desc")
+//     .orderBy("score", "desc")
+//     .limit(fetchSize)
+//     .get();
+
+//   const mergedMap = new Map();
+
+//   for (const doc of snap.docs) {
+//     const base = doc.data();
+//     const uid = String(toNumber(base.userId || doc.id));
+//     const pending = getPendingEntry(docName, uid);
+
+//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
+//   }
+
+//   const pendingEntries = getPendingEntriesByDocName(docName);
+
+//   for (const entry of pendingEntries) {
+//     const uid = String(entry.userId);
+//     if (!mergedMap.has(uid)) {
+//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
+//     }
+//   }
+
+//   const rows = sortRankingRows(Array.from(mergedMap.values()))
+//     .slice(0, limit)
+//     .map((row, index) => ({
+//       rank: index + 1,
+//       ...row
+//     }));
+
+//   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
+//   return rows;
+// }
+
+// module.exports = {
+//   addChat,
+//   flushPendingChats,
+//   shutdown,
+//   getRanking,
+//   getLevelRanking,
+//   getUserLevel,
+//   getUserChatSummary,
+//   getBroadcastRanking
+// };
+
 const admin = require("firebase-admin");
 const db = require("../firebase");
 const { calcScore, getLevel, getNextLevelScore } = require("../utils/level");
-const CHAT_MILESTONE_UNIT = 100; // 운영은 100으로 변경
+const queryCache = require("./queryCache");
+
+const CHAT_MILESTONE_UNIT = 100;
 const AI_CHANNEL_ID = "999846";
 const FLUSH_INTERVAL_MS = 10 * 60 * 1000;
-//const FLUSH_INTERVAL_MS = 10 * 600;
+const RANK_CACHE_TTL_MS = 5000;
+const SUMMARY_CACHE_TTL_MS = 5000;
+const SUMMARY_COLLECTION = "chatRankSummary";
+const SUMMARY_ROW_LIMIT = 100;
+
 const liveLevelState = new Map();
 const pendingCounters = new Map();
 const liveChannelChatState = new Map();
@@ -14,11 +944,6 @@ const liveBroadcastChatState = new Map();
 let flushTimer = null;
 let flushing = false;
 let shuttingDown = false;
-
-const queryCache = require("./queryCache");
-
-const RANK_CACHE_TTL_MS = 5000;
-const SUMMARY_CACHE_TTL_MS = 5000;
 
 function getKstDate(offsetDays = 0) {
   const now = new Date();
@@ -44,6 +969,10 @@ function getMonthKey(offsetMonths = 0) {
 
 function rootDoc(name) {
   return db.collection("chatRank").doc(name);
+}
+
+function summaryDoc(name) {
+  return db.collection(SUMMARY_COLLECTION).doc(name);
 }
 
 function toNumber(value) {
@@ -76,7 +1005,8 @@ function makePendingKey(name, userId) {
 }
 
 function queueCounterUpdate(name, userId, payload, options = {}) {
-  const key = makePendingKey(name, userId);
+  const normalizedUserId = String(toNumber(userId));
+  const key = makePendingKey(name, normalizedUserId);
   const existing = pendingCounters.get(key);
 
   if (existing) {
@@ -95,12 +1025,12 @@ function queueCounterUpdate(name, userId, payload, options = {}) {
     chatCount: toNumber(payload.chatCount),
     score: toNumber(payload.score),
     saveLevel: !!options.saveLevel,
-    docRef: rootDoc(name).collection("users").doc(String(userId))
+    docRef: rootDoc(name).collection("users").doc(normalizedUserId)
   });
 }
 
 function getPendingEntry(docName, userId) {
-  return pendingCounters.get(makePendingKey(docName, userId)) || null;
+  return pendingCounters.get(makePendingKey(docName, String(toNumber(userId)))) || null;
 }
 
 function getPendingEntriesByDocName(docName) {
@@ -126,6 +1056,8 @@ function mergeBaseWithPending(base, pending, options = {}) {
       const level = toNumber(current.level || getLevel(score));
       return {
         ...current,
+        userId: toNumber(current.userId),
+        channelId: toNumber(current.channelId),
         score,
         chatCount: toNumber(current.chatCount),
         level,
@@ -135,6 +1067,8 @@ function mergeBaseWithPending(base, pending, options = {}) {
 
     return {
       ...current,
+      userId: toNumber(current.userId),
+      channelId: toNumber(current.channelId),
       score: toNumber(current.score),
       chatCount: toNumber(current.chatCount)
     };
@@ -166,6 +1100,286 @@ function mergeBaseWithPending(base, pending, options = {}) {
   return merged;
 }
 
+function makeChannelChatStateKey(channelId, userId) {
+  return `${toNumber(channelId)}::${toNumber(userId)}`;
+}
+
+function makeBroadcastChatStateKey(broadcastId, userId) {
+  return `${String(broadcastId)}::${toNumber(userId)}`;
+}
+
+function getRankDocName({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
+  const today = dayKey || getTodayKey(0);
+  const month = monthKey || getMonthKey(0);
+
+  if (scope === "global") {
+    if (period === "daily") return `globalDaily_${today}`;
+    if (period === "monthly") return `globalMonthly_${month}`;
+    if (period === "total") return "globalTotal";
+  }
+
+  const cid = toNumber(channelId);
+
+  if (period === "daily") return `channelDaily_${today}_${cid}`;
+  if (period === "monthly") return `channelMonthly_${month}_${cid}`;
+  if (period === "total") return `channelTotal_${cid}`;
+
+  return `channelDaily_${today}_${cid}`;
+}
+
+function sortRankingRows(rows) {
+  rows.sort((a, b) => {
+    const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
+    if (chatDiff !== 0) return chatDiff;
+
+    const scoreDiff = toNumber(b.score) - toNumber(a.score);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    return toNumber(a.userId) - toNumber(b.userId);
+  });
+
+  return rows;
+}
+
+function sortLevelRows(rows) {
+  rows.sort((a, b) => {
+    const levelDiff = toNumber(b.level) - toNumber(a.level);
+    if (levelDiff !== 0) return levelDiff;
+
+    const scoreDiff = toNumber(b.score) - toNumber(a.score);
+    if (scoreDiff !== 0) return scoreDiff;
+
+    const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
+    if (chatDiff !== 0) return chatDiff;
+
+    return toNumber(a.userId) - toNumber(b.userId);
+  });
+
+  return rows;
+}
+
+function normalizeRankRow(row) {
+  if (!row) return null;
+
+  return {
+    userId: toNumber(row.userId),
+    channelId: toNumber(row.channelId),
+    chatCount: toNumber(row.chatCount),
+    score: toNumber(row.score)
+  };
+}
+
+function normalizeLevelRow(row) {
+  if (!row) return null;
+
+  const score = toNumber(row.score);
+  const level = toNumber(row.level || getLevel(score));
+
+  return {
+    userId: toNumber(row.userId),
+    channelId: toNumber(row.channelId),
+    chatCount: toNumber(row.chatCount),
+    score,
+    level,
+    nextLevelScore: toNumber(row.nextLevelScore || getNextLevelScore(level))
+  };
+}
+
+function dedupeAndSortRows(rows, sortFn, limit, normalizer) {
+  const map = new Map();
+
+  for (const row of rows) {
+    const normalized = normalizer(row);
+    if (!normalized || !normalized.userId) continue;
+    map.set(String(normalized.userId), normalized);
+  }
+
+  return sortFn(Array.from(map.values())).slice(0, limit);
+}
+
+function mergeSummaryRowsWithPending(summaryRows, pendingEntries, options = {}) {
+  const mergedMap = new Map();
+
+  for (const row of summaryRows || []) {
+    const normalized = options.saveLevel ? normalizeLevelRow(row) : normalizeRankRow(row);
+    if (!normalized || !normalized.userId) continue;
+    mergedMap.set(String(normalized.userId), normalized);
+  }
+
+  for (const entry of pendingEntries) {
+    const uid = String(toNumber(entry.userId));
+    const base = mergedMap.get(uid) || null;
+    mergedMap.set(uid, mergeBaseWithPending(base, entry, options));
+  }
+
+  return Array.from(mergedMap.values());
+}
+
+function buildRankRowsFromEntries(entries) {
+  return entries.map((entry) => ({
+    userId: toNumber(entry.userId),
+    channelId: toNumber(entry.channelId),
+    chatCount: toNumber(entry.chatCount),
+    score: toNumber(entry.score)
+  }));
+}
+
+async function buildSummaryFromDb(docName) {
+  const usersRef = rootDoc(docName).collection("users");
+  const isLevelDoc = docName === "globalTotal";
+
+  const rankSnap = await usersRef
+    .orderBy("chatCount", "desc")
+    .orderBy("score", "desc")
+    .limit(SUMMARY_ROW_LIMIT)
+    .get();
+
+  const rankRows = rankSnap.docs.map((doc) => {
+    const data = doc.data();
+    return normalizeRankRow({
+      userId: data.userId || doc.id,
+      channelId: data.channelId,
+      chatCount: data.chatCount,
+      score: data.score
+    });
+  }).filter(Boolean);
+
+  let levelRows = [];
+
+  if (isLevelDoc) {
+    const levelSnap = await usersRef
+      .orderBy("level", "desc")
+      .orderBy("score", "desc")
+      .limit(SUMMARY_ROW_LIMIT)
+      .get();
+
+    levelRows = levelSnap.docs.map((doc) => {
+      const data = doc.data();
+      return normalizeLevelRow({
+        userId: data.userId || doc.id,
+        channelId: data.channelId,
+        chatCount: data.chatCount,
+        score: data.score,
+        level: data.level,
+        nextLevelScore: data.nextLevelScore
+      });
+    }).filter(Boolean);
+  }
+
+  const payload = {
+    docName,
+    rankRows,
+    levelRows,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  };
+
+  await summaryDoc(docName).set(payload, { merge: true });
+
+  return {
+    rankRows,
+    levelRows
+  };
+}
+
+async function getOrBuildSummary(docName) {
+  const snap = await summaryDoc(docName).get();
+
+  if (snap.exists) {
+    const data = snap.data() || {};
+    return {
+      rankRows: Array.isArray(data.rankRows) ? data.rankRows : [],
+      levelRows: Array.isArray(data.levelRows) ? data.levelRows : []
+    };
+  }
+
+  return buildSummaryFromDb(docName);
+}
+
+async function readChangedUserRows(entries, options = {}) {
+  if (!entries.length) {
+    return [];
+  }
+
+  const snaps = await Promise.all(entries.map((entry) => entry.docRef.get()));
+
+  return snaps
+    .map((snap, index) => {
+      if (!snap.exists) return null;
+      const data = snap.data() || {};
+      const entry = entries[index];
+      const base = {
+        userId: data.userId || entry.userId,
+        channelId: data.channelId || entry.channelId,
+        chatCount: data.chatCount,
+        score: data.score,
+        level: data.level,
+        nextLevelScore: data.nextLevelScore
+      };
+
+      return options.saveLevel ? normalizeLevelRow(base) : normalizeRankRow(base);
+    })
+    .filter(Boolean);
+}
+
+async function rebuildTouchedSummary(docName, entries) {
+  const summary = await getOrBuildSummary(docName);
+  const changedRankRows = await readChangedUserRows(entries, { saveLevel: false });
+
+  const nextRankRows = dedupeAndSortRows(
+    [...(summary.rankRows || []), ...changedRankRows],
+    sortRankingRows,
+    SUMMARY_ROW_LIMIT,
+    normalizeRankRow
+  );
+
+  let nextLevelRows = Array.isArray(summary.levelRows) ? summary.levelRows : [];
+
+  if (docName === "globalTotal") {
+    const changedLevelRows = await readChangedUserRows(entries, { saveLevel: true });
+    nextLevelRows = dedupeAndSortRows(
+      [...nextLevelRows, ...changedLevelRows],
+      sortLevelRows,
+      SUMMARY_ROW_LIMIT,
+      normalizeLevelRow
+    );
+  }
+
+  await summaryDoc(docName).set({
+    docName,
+    rankRows: nextRankRows,
+    levelRows: nextLevelRows,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+  }, { merge: true });
+}
+
+async function updateSummariesAfterFlush(entries) {
+  const grouped = new Map();
+
+  for (const entry of entries) {
+    const list = grouped.get(entry.docName);
+    if (list) {
+      list.push(entry);
+    } else {
+      grouped.set(entry.docName, [entry]);
+    }
+  }
+
+  for (const [docName, docEntries] of grouped.entries()) {
+    await rebuildTouchedSummary(docName, docEntries);
+  }
+}
+
+function syncLevelStateAfterFlush(entry) {
+  const key = String(entry.userId);
+  const state = liveLevelState.get(key);
+  if (!state) return;
+
+  state.baseScore += toNumber(entry.score);
+  state.pendingScore = Math.max(0, toNumber(state.pendingScore) - toNumber(entry.score));
+  state.pendingChatCount = Math.max(0, toNumber(state.pendingChatCount) - toNumber(entry.chatCount));
+  state.announcedLevel = getLevel(state.baseScore);
+}
+
 async function flushPendingChats() {
   if (flushing || pendingCounters.size === 0) {
     return { flushed: 0 };
@@ -181,7 +1395,7 @@ async function flushPendingChats() {
     const now = admin.firestore.FieldValue.serverTimestamp();
 
     for (const entry of entries) {
-      let data = {
+      const data = {
         userId: entry.userId,
         channelId: entry.channelId,
         chatCount: admin.firestore.FieldValue.increment(entry.chatCount),
@@ -212,14 +1426,14 @@ async function flushPendingChats() {
     }
 
     await writer.close();
-    /* 여기서 메모리 상태 정리 */
+    await updateSummariesAfterFlush(entries);
+
     for (const entry of entries) {
       if (entry.saveLevel) {
         syncLevelStateAfterFlush(entry);
       }
     }
-    
-    //queryCache.clear();
+
     queryCache.clearPrefix("rank");
     queryCache.clearPrefix("levelRank");
     queryCache.clearPrefix("broadcastRank");
@@ -263,6 +1477,84 @@ async function shutdown() {
   }
 }
 
+function buildChatMilestoneMessage(nickname, milestone) {
+  const name = nickname || "익명";
+
+  if (milestone >= 1000) {
+    return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 미쳐 날뛰고 있습니다!`;
+  }
+
+  return `🎉 ${name}님이 ${milestone}채팅 달성! 존재감이 아주 미쳤습니다 👏`;
+}
+
+async function getOrCreateBroadcastChatState(broadcastId, userId) {
+  const key = makeBroadcastChatStateKey(broadcastId, userId);
+  const cached = liveBroadcastChatState.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const docName = `broadcast_${String(broadcastId)}`;
+  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+  const snap = await docRef.get();
+  const base = snap.exists ? snap.data() : null;
+  const pending = getPendingEntry(docName, userId);
+  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+  const state = {
+    totalChatCount: toNumber(merged?.chatCount)
+  };
+
+  liveBroadcastChatState.set(key, state);
+  return state;
+}
+
+async function getOrCreateChannelChatState(channelId, userId) {
+  const key = makeChannelChatStateKey(channelId, userId);
+  const cached = liveChannelChatState.get(key);
+
+  if (cached) {
+    return cached;
+  }
+
+  const docName = `channelTotal_${toNumber(channelId)}`;
+  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
+  const snap = await docRef.get();
+  const base = snap.exists ? snap.data() : null;
+  const pending = getPendingEntry(docName, userId);
+  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
+
+  const state = {
+    totalChatCount: toNumber(merged?.chatCount)
+  };
+
+  liveChannelChatState.set(key, state);
+  return state;
+}
+
+async function getOrCreateLevelState(userId, channelId) {
+  const key = String(toNumber(userId));
+  const cached = liveLevelState.get(key);
+  if (cached) return cached;
+
+  const ref = rootDoc("globalTotal").collection("users").doc(key);
+  const snap = await ref.get();
+  const base = snap.exists ? snap.data() : {};
+
+  const state = {
+    userId: toNumber(userId),
+    channelId: toNumber(channelId),
+    baseScore: toNumber(base.score),
+    pendingScore: 0,
+    pendingChatCount: 0,
+    announcedLevel: toNumber(base.level || getLevel(toNumber(base.score)))
+  };
+
+  liveLevelState.set(key, state);
+  return state;
+}
+
 async function addChat(chat) {
   ensureFlushScheduler();
 
@@ -285,7 +1577,6 @@ async function addChat(chat) {
   const month = getMonthKey();
 
   const levelState = await getOrCreateLevelState(userId, channelId);
-
   const prevScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
   const prevLevel = getLevel(prevScore);
 
@@ -304,7 +1595,6 @@ async function addChat(chat) {
 
   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
     levelState.announcedLevel = nextLevel;
-
     result = {
       ...result,
       levelUp: true,
@@ -330,9 +1620,8 @@ async function addChat(chat) {
   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
-  queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
+  queueCounterUpdate("globalTotal", userId, payload, { saveLevel: true });
 
-  /* 방송 기준 100단위 축하 */
   if (chat.broadcastId) {
     const broadcastState = await getOrCreateBroadcastChatState(chat.broadcastId, userId);
 
@@ -358,264 +1647,16 @@ async function addChat(chat) {
 
   return result;
 }
-// async function addChat(chat) {
-//   ensureFlushScheduler();
 
-//   const channelId = toNumber(chat.channelId);
-//   const clientChannelId = toNumber(chat.clientChannelId);
-//   const userId = toNumber(chat.clientChannelId || chat.userId || chat.memberId);
-//   const message = String(chat.message || "").trim();
-
-//   if (String(clientChannelId) === AI_CHANNEL_ID) {
-//     return { levelUp: false, queued: false };
-//   }
-
-//   if (!channelId || !userId || !message) {
-//     return { levelUp: false, queued: false };
-//   }
-
-//   const score = calcScore(message);
-//   const today = getTodayKey();
-//   const month = getMonthKey();
-
-//   const levelState = await getOrCreateLevelState(userId, channelId);
-
-//   const prevScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
-//   const prevLevel = getLevel(prevScore);
-
-//   levelState.pendingScore += score;
-//   levelState.pendingChatCount += 1;
-//   levelState.channelId = channelId;
-
-//   const nextScore = toNumber(levelState.baseScore) + toNumber(levelState.pendingScore);
-//   const nextLevel = getLevel(nextScore);
-
-//   const channelChatState = await getOrCreateChannelChatState(channelId, userId);
-//   channelChatState.totalChatCount = toNumber(channelChatState.totalChatCount) + 1;
-
-//   const milestone = channelChatState.totalChatCount;
-//   const isChatMilestone = milestone >= 100 && milestone % 100 === 0;
-
-//   let levelUpResult = {
-//     levelUp: false,
-//     queued: true,
-//     chatMilestone: false,
-//     milestone: 0,
-//     message: null
-//   };
-
-//   if (nextLevel > prevLevel && nextLevel > toNumber(levelState.announcedLevel)) {
-//     levelState.announcedLevel = nextLevel;
-
-//     levelUpResult = {
-//       ...levelUpResult,
-//       levelUp: true,
-//       prevLevel,
-//       nextLevel,
-//       score: nextScore,
-//       queued: true
-//     };
-//   }
-
-//   if (isChatMilestone) {
-//     levelUpResult.chatMilestone = true;
-//     levelUpResult.milestone = milestone;
-//     levelUpResult.message = buildChatMilestoneMessage(chat.nickname, milestone);
-//   }
-
-//   const payload = {
-//     userId,
-//     channelId,
-//     chatCount: 1,
-//     score
-//   };
-//   //console.log("broadcast save:", chat.broadcastId, userId);
-//   if (chat.broadcastId) {
-    
-//     queueCounterUpdate(`broadcast_${chat.broadcastId}`, userId, payload, { saveLevel: false });
-//   }
-
-//   queueCounterUpdate(`channelDaily_${today}_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`channelMonthly_${month}_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`channelTotal_${channelId}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalDaily_${today}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalMonthly_${month}`, userId, payload, { saveLevel: false });
-//   queueCounterUpdate(`globalTotal`, userId, payload, { saveLevel: true });
-
-//   return levelUpResult;
-// }
-
-function makeChannelChatStateKey(channelId, userId) {
-  return `${toNumber(channelId)}::${toNumber(userId)}`;
-}
-function makeBroadcastChatStateKey(broadcastId, userId) {
-  return `${String(broadcastId)}::${toNumber(userId)}`;
+async function getRankingRowsFromSummary(docName) {
+  const summary = await getOrBuildSummary(docName);
+  return Array.isArray(summary.rankRows) ? summary.rankRows : [];
 }
 
-async function getOrCreateBroadcastChatState(broadcastId, userId) {
-  const key = makeBroadcastChatStateKey(broadcastId, userId);
-  const cached = liveBroadcastChatState.get(key);
-
-  if (cached) {
-    return cached;
-  }
-
-  const docName = `broadcast_${String(broadcastId)}`;
-  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
-  const snap = await docRef.get();
-  const base = snap.exists ? snap.data() : null;
-  const pending = getPendingEntry(docName, String(toNumber(userId)));
-  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
-
-  const state = {
-    totalChatCount: toNumber(merged?.chatCount)
-  };
-
-  liveBroadcastChatState.set(key, state);
-  return state;
+async function getLevelRowsFromSummary(docName) {
+  const summary = await getOrBuildSummary(docName);
+  return Array.isArray(summary.levelRows) ? summary.levelRows : [];
 }
-
-async function getOrCreateChannelChatState(channelId, userId) {
-  const key = makeChannelChatStateKey(channelId, userId);
-  const cached = liveChannelChatState.get(key);
-
-  if (cached) {
-    return cached;
-  }
-
-  const docName = `channelTotal_${toNumber(channelId)}`;
-  const docRef = rootDoc(docName).collection("users").doc(String(toNumber(userId)));
-  const snap = await docRef.get();
-  const base = snap.exists ? snap.data() : null;
-  const pending = getPendingEntry(docName, String(toNumber(userId)));
-  const merged = mergeBaseWithPending(base, pending, { saveLevel: false });
-
-  const state = {
-    totalChatCount: toNumber(merged?.chatCount)
-  };
-
-  liveChannelChatState.set(key, state);
-  return state;
-}
-
-function buildChatMilestoneMessage(nickname, milestone) {
-  const name = nickname || "익명";
-  console.log(milestone)
-  if (milestone >= 1000) {
-    return `🏆🔥 ${name}님이 무려 ${milestone}채팅을 달성했습니다! 채팅력 미쳐 날뛰고 있습니다!`;
-  }
-
-  return `🎉 ${name}님이 ${milestone}채팅 달성! 존재감이 아주 미쳤습니다 👏`;
-}
-
-function syncLevelStateAfterFlush(entry) {
-  const key = String(entry.userId);
-  const state = liveLevelState.get(key);
-  if (!state) return;
-
-  state.baseScore += toNumber(entry.score);
-  state.pendingScore = Math.max(0, toNumber(state.pendingScore) - toNumber(entry.score));
-  state.pendingChatCount = Math.max(0, toNumber(state.pendingChatCount) - toNumber(entry.chatCount));
-  state.announcedLevel = getLevel(state.baseScore);
-}
-function getRankDocName({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
-  const today = dayKey || getTodayKey(0);
-  const month = monthKey || getMonthKey(0);
-
-  if (scope === "global") {
-    if (period === "daily") return `globalDaily_${today}`;
-    if (period === "monthly") return `globalMonthly_${month}`;
-    if (period === "total") return `globalTotal`;
-  }
-
-  const cid = toNumber(channelId);
-
-  if (period === "daily") return `channelDaily_${today}_${cid}`;
-  if (period === "monthly") return `channelMonthly_${month}_${cid}`;
-  if (period === "total") return `channelTotal_${cid}`;
-
-  return `channelDaily_${today}_${cid}`;
-}
-
-function getRankRef({ channelId, scope = "channel", period = "daily", dayKey, monthKey }) {
-  const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
-  return rootDoc(docName).collection("users");
-}
-
-function sortRankingRows(rows) {
-  rows.sort((a, b) => {
-    const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
-    if (chatDiff !== 0) return chatDiff;
-
-    const scoreDiff = toNumber(b.score) - toNumber(a.score);
-    if (scoreDiff !== 0) return scoreDiff;
-
-    return toNumber(a.userId) - toNumber(b.userId);
-  });
-
-  return rows;
-}
-
-// async function getRanking({
-//   channelId,
-//   scope = "channel",
-//   period = "daily",
-//   limit = 5,
-//   dayKey,
-//   monthKey
-// }) {
-//   const cacheKey = [
-//     "rank",
-//     channelId,
-//     scope,
-//     period,
-//     limit,
-//     dayKey || "",
-//     monthKey || ""
-//   ];
-
-//   const cached = queryCache.get(cacheKey);
-//   if (cached) return cached;
-
-//   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
-//   const ref = rootDoc(docName).collection("users");
-//   const fetchSize = Math.max(limit * 5, 50);
-
-//   const snap = await ref
-//     .orderBy("chatCount", "desc")
-//     .orderBy("score", "desc")
-//     .limit(fetchSize)
-//     .get();
-
-//   const mergedMap = new Map();
-
-//   for (const doc of snap.docs) {
-//     const base = doc.data();
-//     const uid = String(toNumber(base.userId || doc.id));
-//     const pending = getPendingEntry(docName, uid);
-
-//     mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
-//   }
-
-//   const pendingEntries = getPendingEntriesByDocName(docName);
-
-//   for (const entry of pendingEntries) {
-//     const uid = String(entry.userId);
-//     if (!mergedMap.has(uid)) {
-//       mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
-//     }
-//   }
-
-//   const rows = sortRankingRows(Array.from(mergedMap.values()))
-//     .slice(0, limit)
-//     .map((row, index) => ({
-//       rank: index + 1,
-//       ...row
-//     }));
-
-//   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
-//   return rows;
-// }
 
 async function getRanking({
   channelId,
@@ -625,7 +1666,6 @@ async function getRanking({
   dayKey,
   monthKey
 }) {
-
   const cacheKey = [
     "rank",
     channelId,
@@ -640,93 +1680,23 @@ async function getRanking({
   if (cached) return cached;
 
   const docName = getRankDocName({ channelId, scope, period, dayKey, monthKey });
-  const ref = rootDoc(docName).collection("users");
-
-  const fetchSize = Math.max(limit * 5, 50);
-
-  const snap = await ref
-    .orderBy("chatCount", "desc")
-    .orderBy("score", "desc")
-    .limit(fetchSize)
-    .get();
-
-  const mergedMap = new Map();
-
-  /* Firestore 데이터 */
-  for (const doc of snap.docs) {
-
-    const base = doc.data();
-    const uid = String(toNumber(base.userId || doc.id));
-
-    const pending = getPendingEntry(docName, uid);
-
-    mergedMap.set(
-      uid,
-      mergeBaseWithPending(base, pending, { saveLevel: false })
-    );
-  }
-
-  /* pending 데이터 */
   const pendingEntries = getPendingEntriesByDocName(docName);
+  const summaryRows = await getRankingRowsFromSummary(docName);
 
-  for (const entry of pendingEntries) {
+  let mergedRows = mergeSummaryRowsWithPending(summaryRows, pendingEntries, { saveLevel: false });
 
-    const uid = String(entry.userId);
-
-    if (!mergedMap.has(uid)) {
-      mergedMap.set(
-        uid,
-        mergeBaseWithPending(null, entry, { saveLevel: false })
-      );
-    }
+  if (mergedRows.length === 0 && pendingEntries.length > 0) {
+    mergedRows = buildRankRowsFromEntries(pendingEntries);
   }
 
-  /* 🔥 Firestore 데이터가 하나도 없을 때도 pending으로 ranking 생성 */
-  if (mergedMap.size === 0 && pendingEntries.length > 0) {
-
-    const rows = sortRankingRows(
-      pendingEntries.map(e => ({
-        userId: e.userId,
-        chatCount: e.chatCount,
-        score: e.score
-      }))
-    )
+  const rows = sortRankingRows(mergedRows)
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
-      ...row
-    }));
-
-    queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
-    return rows;
-  }
-
-  const rows = sortRankingRows(Array.from(mergedMap.values()))
-    .slice(0, limit)
-    .map((row, index) => ({
-      rank: index + 1,
-      ...row
+      ...normalizeRankRow(row)
     }));
 
   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
-
-  return rows;
-}
-
-function sortLevelRows(rows) {
-  rows.sort((a, b) => {
-    const levelDiff = toNumber(b.level) - toNumber(a.level);
-    if (levelDiff !== 0) return levelDiff;
-
-    const scoreDiff = toNumber(b.score) - toNumber(a.score);
-    if (scoreDiff !== 0) return scoreDiff;
-
-    const chatDiff = toNumber(b.chatCount) - toNumber(a.chatCount);
-    if (chatDiff !== 0) return chatDiff;
-
-    return toNumber(a.userId) - toNumber(b.userId);
-  });
-
   return rows;
 }
 
@@ -736,39 +1706,16 @@ async function getLevelRanking(limit = 5) {
   if (cached) return cached;
 
   const docName = "globalTotal";
-  const ref = rootDoc(docName).collection("users");
-  const fetchSize = Math.max(limit * 5, 50);
-
-  const snap = await ref
-    .orderBy("level", "desc")
-    .orderBy("score", "desc")
-    .limit(fetchSize)
-    .get();
-
-  const mergedMap = new Map();
-
-  for (const doc of snap.docs) {
-    const base = doc.data();
-    const uid = String(toNumber(base.userId || doc.id));
-    const pending = getPendingEntry(docName, uid);
-
-    mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: true }));
-  }
-
   const pendingEntries = getPendingEntriesByDocName(docName);
+  const summaryRows = await getLevelRowsFromSummary(docName);
 
-  for (const entry of pendingEntries) {
-    const uid = String(entry.userId);
-    if (!mergedMap.has(uid)) {
-      mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: true }));
-    }
-  }
-
-  const rows = sortLevelRows(Array.from(mergedMap.values()))
+  const rows = sortLevelRows(
+    mergeSummaryRowsWithPending(summaryRows, pendingEntries, { saveLevel: true })
+  )
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
-      ...row
+      ...normalizeLevelRow(row)
     }));
 
   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);
@@ -791,7 +1738,7 @@ async function getUserLevel(userId) {
 async function getDocData(docRef, docName, userId, options = {}) {
   const snap = await docRef.get();
   const base = snap.exists ? snap.data() : null;
-  const pending = getPendingEntry(docName, String(toNumber(userId)));
+  const pending = getPendingEntry(docName, userId);
 
   return mergeBaseWithPending(base, pending, options);
 }
@@ -812,7 +1759,7 @@ async function getUserChatSummary(channelId, userId) {
   const channelTotalName = `channelTotal_${cid}`;
   const globalDailyName = `globalDaily_${today}`;
   const globalMonthlyName = `globalMonthly_${month}`;
-  const globalTotalName = `globalTotal`;
+  const globalTotalName = "globalTotal";
 
   const [
     channelDaily,
@@ -845,67 +1792,26 @@ async function getUserChatSummary(channelId, userId) {
   return result;
 }
 
-async function getOrCreateLevelState(userId, channelId) {
-  const key = String(userId);
-  const cached = liveLevelState.get(key);
-  if (cached) return cached;
-
-  const ref = rootDoc("globalTotal").collection("users").doc(key);
-  const snap = await ref.get();
-  const base = snap.exists ? snap.data() : {};
-
-  const state = {
-    userId: Number(userId),
-    channelId: Number(channelId),
-    baseScore: toNumber(base.score),
-    pendingScore: 0,
-    pendingChatCount: 0,
-    announcedLevel: toNumber(base.level || getLevel(toNumber(base.score)))
-  };
-
-  liveLevelState.set(key, state);
-  return state;
-}
-
 async function getBroadcastRanking(broadcastId, limit = 5) {
   const cacheKey = ["broadcastRank", broadcastId, limit];
   const cached = queryCache.get(cacheKey);
   if (cached) return cached;
 
   const docName = `broadcast_${broadcastId}`;
-  const ref = rootDoc(docName).collection("users");
-  const fetchSize = Math.max(limit * 5, 50);
-
-  const snap = await ref
-    .orderBy("chatCount", "desc")
-    .orderBy("score", "desc")
-    .limit(fetchSize)
-    .get();
-
-  const mergedMap = new Map();
-
-  for (const doc of snap.docs) {
-    const base = doc.data();
-    const uid = String(toNumber(base.userId || doc.id));
-    const pending = getPendingEntry(docName, uid);
-
-    mergedMap.set(uid, mergeBaseWithPending(base, pending, { saveLevel: false }));
-  }
-
   const pendingEntries = getPendingEntriesByDocName(docName);
+  const summaryRows = await getRankingRowsFromSummary(docName);
 
-  for (const entry of pendingEntries) {
-    const uid = String(entry.userId);
-    if (!mergedMap.has(uid)) {
-      mergedMap.set(uid, mergeBaseWithPending(null, entry, { saveLevel: false }));
-    }
+  let mergedRows = mergeSummaryRowsWithPending(summaryRows, pendingEntries, { saveLevel: false });
+
+  if (mergedRows.length === 0 && pendingEntries.length > 0) {
+    mergedRows = buildRankRowsFromEntries(pendingEntries);
   }
 
-  const rows = sortRankingRows(Array.from(mergedMap.values()))
+  const rows = sortRankingRows(mergedRows)
     .slice(0, limit)
     .map((row, index) => ({
       rank: index + 1,
-      ...row
+      ...normalizeRankRow(row)
     }));
 
   queryCache.set(cacheKey, rows, RANK_CACHE_TTL_MS);

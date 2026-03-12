@@ -480,7 +480,7 @@ async function startCollector(channelId, ownerNickname) {
       if (announcementCache.size > 1000) {
         announcementCache.clear();
       }
-
+    
       queue.push({
         type: "announcement",
         channelId,
@@ -501,11 +501,18 @@ async function startCollector(channelId, ownerNickname) {
       const clientChannelId = data.member?.channelId;
       const amount = data.args?.amount;
       const productName = data.args?.productName;
-
+      
+      /**
+       * type
+       * - gift  : 렉스
+       * - honey : 꿀
+       */
+      const type = data.args?.type === "honey" ? "honey" : "gift";
+      
       if (!nickname || !amount) return;
 
       queue.push({
-        type: "gift",
+        type: type,
         channelId,
         clientChannelId,
         nickname,

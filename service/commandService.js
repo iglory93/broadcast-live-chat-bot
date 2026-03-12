@@ -41,14 +41,16 @@ async function handleCommand(chat) {
   //console.log("channelId:", channelId);
 
   /* 후원 이벤트 */
-  if (chat.type === "gift") {
+  if (chat.type === "gift" || chat.type === "honey") {
     const nickname = chat.nickname;
     const amount = chat.amount;
     let productName = chat.productName || "";
 
     if (!nickname || !amount) return;
+    
+    const item = chat.type === "gift" ? "렉스" : "꿀";
+    const amountText = amount + item;
 
-    const amountText = amount + "렉스";
     if (productName) {
       productName = productName.replace(amountText, "");
       if( productName != "" ){
@@ -945,8 +947,61 @@ async function handleCommand(chat) {
     //   return;
     // }
     /* 채팅순위 */
+    // else if (command.startsWith("채팅순위")) {
+    //   const parsed = parseChatRankCommand(command);
+
+    //   let ranking = [];
+    //   let title = "";
+
+    //   if (parsed.period === "broadcast" && parsed.scope === "channel") {
+    //     const streamInfo = streamStore.get(channelId);
+    //     const broadcastId = streamInfo?.broadcastId || null;
+
+    //     if (!broadcastId) {
+    //       await sendChat(channelId, "현재 방송 정보를 찾을 수 없습니다.");
+    //       return;
+    //     }
+
+    //     ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
+    //     title = getChatRankTitle(parsed.scope, parsed.period);
+    //   } else {
+    //     ranking = await rankStore.getRanking({
+    //       channelId,
+    //       scope: parsed.scope,
+    //       period: parsed.period,
+    //       limit: 10,
+    //       dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
+    //     });
+
+    //     title = getChatRankTitle(parsed.scope, parsed.period);
+    //   }
+
+    //   if (!ranking.length) {
+    //     await sendChat(channelId, "채팅 순위 정보가 없습니다.");
+    //     return;
+    //   }
+
+    //   const nicknameMap = await getNicknameMap(ranking);
+    //   const lines = [title];
+
+    //   for (const row of ranking) {
+    //     lines.push(`${row.rank}위 ${nicknameMap[String(row.userId)]} ${row.chatCount}회`);
+    //   }
+
+    //   await sendChat(channelId, lines.join("\n"));
+    //   return;
+    // }
+    /* 채팅순위 */
     else if (command.startsWith("채팅순위")) {
       const parsed = parseChatRankCommand(command);
+
+      if (parsed.invalidDateToken) {
+        await sendChat(
+          channelId,
+          `날짜 형식이 올바르지 않습니다. 예) ${startStr}채팅순위 20260309 / ${startStr}채팅순위 전체 2026-03-09`
+        );
+        return;
+      }
 
       let ranking = [];
       let title = "";
@@ -961,17 +1016,28 @@ async function handleCommand(chat) {
         }
 
         ranking = await rankStore.getBroadcastRanking(broadcastId, 10);
-        title = getChatRankTitle(parsed.scope, parsed.period);
+        title = getChatRankTitle(parsed.scope, parsed.period, {
+          dayOffset: parsed.dayOffset,
+          explicitDayKey: parsed.explicitDayKey
+        });
       } else {
+        const resolvedDayKey =
+          parsed.period === "daily"
+            ? (parsed.explicitDayKey || getDateKey(parsed.dayOffset))
+            : undefined;
+
         ranking = await rankStore.getRanking({
           channelId,
           scope: parsed.scope,
           period: parsed.period,
           limit: 10,
-          dayKey: parsed.period === "daily" ? getDateKey(parsed.dayOffset) : undefined
+          dayKey: resolvedDayKey
         });
 
-        title = getChatRankTitle(parsed.scope, parsed.period);
+        title = getChatRankTitle(parsed.scope, parsed.period, {
+          dayOffset: parsed.dayOffset,
+          explicitDayKey: parsed.explicitDayKey
+        });
       }
 
       if (!ranking.length) {
@@ -1427,41 +1493,136 @@ ${result.resultText}`;
   }
 }
 
+// function parseChatRankCommand(command) {
+//   const parts = command.split(/\s+/).filter(Boolean);
+
+//   let scope = "channel";
+//   let period = "broadcast";
+//   let dayOffset = 0;
+
+//   for (let i = 1; i < parts.length; i += 1) {
+//     const token = parts[i];
+
+//     if (token === "전체") {
+//       scope = "global";
+//     } else if (token === "오늘") {
+//       period = "daily";
+//       dayOffset = 0;
+//     } else if (token === "어제") {
+//       period = "daily";
+//       dayOffset = -1;
+//     } else if (token === "월" || token === "월간") {
+//       period = "monthly";
+//     } else if (token === "누적") {
+//       period = "total";
+//     }
+//   }
+
+//   if (scope === "global" && period === "broadcast") {
+//     period = "daily";
+//     dayOffset = 0;
+//   }
+
+//   return { scope, period, dayOffset };
+// }
 function parseChatRankCommand(command) {
   const parts = command.split(/\s+/).filter(Boolean);
 
   let scope = "channel";
   let period = "broadcast";
   let dayOffset = 0;
+  let explicitDayKey = "";
+  let invalidDateToken = "";
 
   for (let i = 1; i < parts.length; i += 1) {
     const token = parts[i];
 
     if (token === "전체") {
       scope = "global";
-    } else if (token === "오늘") {
+      continue;
+    }
+
+    if (token === "오늘") {
       period = "daily";
       dayOffset = 0;
-    } else if (token === "어제") {
+      continue;
+    }
+
+    if (token === "어제") {
       period = "daily";
       dayOffset = -1;
-    } else if (token === "월" || token === "월간") {
+      continue;
+    }
+
+    if (token === "월" || token === "월간") {
       period = "monthly";
-    } else if (token === "누적") {
+      continue;
+    }
+
+    if (token === "누적") {
       period = "total";
+      continue;
+    }
+
+    const parsedDayKey = parseExplicitDateToken(token);
+
+    if (parsedDayKey) {
+      explicitDayKey = parsedDayKey;
+      continue;
+    }
+
+    if (looksLikeDateToken(token)) {
+      invalidDateToken = token;
     }
   }
 
+  // 날짜를 직접 넣으면 일간 조회로 강제
+  if (explicitDayKey) {
+    period = "daily";
+    dayOffset = 0;
+  }
+
+  // 전체 + 기본값이면 오늘 전체 순위
   if (scope === "global" && period === "broadcast") {
     period = "daily";
     dayOffset = 0;
   }
 
-  return { scope, period, dayOffset };
+  return {
+    scope,
+    period,
+    dayOffset,
+    explicitDayKey,
+    invalidDateToken
+  };
 }
 
-function getChatRankTitle(scope, period, dayOffset = 0) {
+// function getChatRankTitle(scope, period, dayOffset = 0) {
+//   const scopeText = scope === "global" ? "전체 방송" : "현재 방송";
+
+//   if (period === "broadcast") {
+//     return `🏆 현재 방송 채팅 순위`;
+//   }
+
+//   if (period === "monthly") {
+//     return `🏆 ${scopeText} 월간 채팅 순위`;
+//   }
+
+//   if (period === "total") {
+//     return `🏆 ${scopeText} 누적 채팅 순위`;
+//   }
+
+//   if (dayOffset === -1) {
+//     return `🏆 ${scopeText} 어제 채팅 순위`;
+//   }
+
+//   return `🏆 ${scopeText} 오늘 채팅 순위`;
+// }
+
+function getChatRankTitle(scope, period, options = {}) {
   const scopeText = scope === "global" ? "전체 방송" : "현재 방송";
+  const dayOffset = Number(options.dayOffset || 0);
+  const explicitDayKey = String(options.explicitDayKey || "").trim();
 
   if (period === "broadcast") {
     return `🏆 현재 방송 채팅 순위`;
@@ -1475,6 +1636,10 @@ function getChatRankTitle(scope, period, dayOffset = 0) {
     return `🏆 ${scopeText} 누적 채팅 순위`;
   }
 
+  if (explicitDayKey) {
+    return `🏆 ${scopeText} ${explicitDayKey} 채팅 순위`;
+  }
+
   if (dayOffset === -1) {
     return `🏆 ${scopeText} 어제 채팅 순위`;
   }
@@ -1482,21 +1647,47 @@ function getChatRankTitle(scope, period, dayOffset = 0) {
   return `🏆 ${scopeText} 오늘 채팅 순위`;
 }
 
-function getCompatibility(nick1, nick2) {
-  const today = new Date();
+function parseExplicitDateToken(token) {
+  if (!token) return null;
 
-  const dateStr =
-    today.getFullYear().toString() +
-    String(today.getMonth() + 1).padStart(2, "0") +
-    String(today.getDate()).padStart(2, "0");
+  let year;
+  let month;
+  let day;
 
-  const pair = [nick1, nick2].sort().join("");
-  const seed = pair + dateStr;
-  const hash = crypto.createHash("sha256").update(seed).digest("hex");
-  const num = parseInt(hash.substring(0, 4), 16);
+  if (/^\d{8}$/.test(token)) {
+    year = Number(token.slice(0, 4));
+    month = Number(token.slice(4, 6));
+    day = Number(token.slice(6, 8));
+  } else {
+    const match = token.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) return null;
 
-  return num % 101;
+    year = Number(match[1]);
+    month = Number(match[2]);
+    day = Number(match[3]);
+  }
+
+  if (month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+
+  if (
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() + 1 !== month ||
+    date.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
+
+function looksLikeDateToken(token) {
+  return /^\d{8}$/.test(token) || /^\d{4}-\d{2}-\d{2}$/.test(token);
+}
+
 
 function getCompatibilityDetail(nick1, nick2) {
 
