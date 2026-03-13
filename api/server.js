@@ -10,6 +10,7 @@ const streamStore = require("../store/streamStore");
 const sendChat = require("../chat/sendChat");
 const channelConfigStore = require("../store/channelConfigStore");
 const crypto = require("crypto");
+const { unsubscribe } = require("../service/subscriptionService");
 
 const app = express();
 app.use(express.json());
@@ -420,6 +421,36 @@ app.post("/dashboard/channels/register", requireDashboardAuthApi, async (req, re
   }
 });
 
+// app.delete("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req, res) => {
+//   try {
+//     const channelId = normalizeChannelId(req.params.channelId);
+
+//     if (!channelId) {
+//       res.status(400).send({
+//         ok: false,
+//         error: "channelId required"
+//       });
+//       return;
+//     }
+
+//     await db.collection("channels").doc(channelId).delete();
+
+//     console.log("dashboard channel unregistered:", channelId);
+
+//     res.send({
+//       ok: true,
+//       channelId,
+//       registered: false,
+//       message: "unregistered"
+//     });
+//   } catch (err) {
+//     console.error("dashboard channel unregister error:", err);
+//     res.status(500).send({
+//       ok: false,
+//       error: err.message
+//     });
+//   }
+// });
 app.delete("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req, res) => {
   try {
     const channelId = normalizeChannelId(req.params.channelId);
@@ -432,15 +463,29 @@ app.delete("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req
       return;
     }
 
+    let unsubscribed = false;
+    let unsubscribeError = null;
+
+    try {
+      unsubscribed = await unsubscribe(channelId);
+    } catch (err) {
+      unsubscribeError = err;
+      console.error("dashboard channel unsubscribe error:", channelId, err.message);
+    }
+
     await db.collection("channels").doc(channelId).delete();
 
-    console.log("dashboard channel unregistered:", channelId);
+    console.log("dashboard channel unregistered:", channelId, "unsubscribed:", unsubscribed);
 
     res.send({
       ok: true,
       channelId,
       registered: false,
-      message: "unregistered"
+      unsubscribed,
+      message: unsubscribed
+        ? "unregistered_and_unsubscribed"
+        : "unregistered_but_unsubscribe_failed",
+      warning: unsubscribeError ? unsubscribeError.message : null
     });
   } catch (err) {
     console.error("dashboard channel unregister error:", err);

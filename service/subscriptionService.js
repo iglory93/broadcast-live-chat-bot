@@ -102,9 +102,25 @@ async function ensureSubscribed(channelId) {
   return subscribe(channelId);
 }
 
+async function unsubscribe(channelId) {
+  channelId = String(channelId);
+
+  const res = await requestWithRelogin((cookie) =>
+    axios.delete(`${BASE_URL}/api/subscribes/${encodeURIComponent(channelId)}`, {
+      headers: buildHeaders(cookie),
+      timeout: 5000,
+      validateStatus: (status) =>
+        status === 200 || status === 204 || status === 404
+    })
+  );
+
+  return res.status === 200 || res.status === 204 || res.status === 404;
+}
+
 module.exports = {
   fetchSubscriptionList,
   checkSubscribed,
   subscribe,
-  ensureSubscribed
+  ensureSubscribed,
+  unsubscribe
 };
