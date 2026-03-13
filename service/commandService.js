@@ -16,8 +16,10 @@ const cleanStore = require("../store/cleanStore.js");
 const utils = require("../utils/util");
 const timerStore = require("../store/timerStore");
 const { getFortune } = require("../command/fortune");
-const aiConfigStore = require("../store/aiConfigStore");
+const channelConfigStore = require("../store/channelConfigStore");
+const streamLexStore = require("../store/streamLexStore");
 const noticeStore = require("../store/noticeStore");
+
 
 async function getNicknameMap(rows) {
   const ids = [...new Set(rows.map(row => String(row.userId)))];
@@ -36,24 +38,64 @@ async function getNicknameOrDefault(userId) {
   return (await profileCache.getNickname(userId)) || `유저${userId}`;
 }
 
+async function maybeSendLexTotalNotice(chat) {
+  const channelId = String(chat?.channelId || "");
+
+  if (!channelId) return;
+  if (chat?.type !== "gift") return;
+  if (!channelConfigStore.isLexNoticeEnabled(channelId)) return;
+
+  const giftAmount = Number(chat?.amount);
+
+  if (!Number.isFinite(giftAmount) || giftAmount < 10) {
+    return;
+  }
+
+  if (Math.random() >= 0.5) {
+    return;
+  }
+
+  const totalLex = streamLexStore.get(channelId);
+
+  if (!Number.isFinite(totalLex) || totalLex <= 0) {
+    return;
+  }
+
+  if (totalLex < giftAmount) {
+    return;
+  }
+
+  await sendChat(
+    channelId,
+    `💰 현재 방송 누적 렉스 ${totalLex.toLocaleString()}개입니다.`
+  );
+}
+
+function buildChannelSettingStatusMessage(channelId) {
+  const status = channelConfigStore.getStatus(channelId);
+
+  return `⚙️ 현재 방송 설정 상태
+🤖 AI 기능: ${status.aiEnabled ? "ON" : "OFF"}
+💰 렉스후원메세지: ${status.lexNoticeEnabled ? "ON" : "OFF"}`;
+}
+
 async function handleCommand(chat) {
   const channelId = String(chat?.channelId);
-  //console.log("channelId:", channelId);
 
-  /* 후원 이벤트 */
+   /* 후원 이벤트 */
   if (chat.type === "gift" || chat.type === "honey") {
     const nickname = chat.nickname;
     const amount = chat.amount;
     let productName = chat.productName || "";
 
     if (!nickname || !amount) return;
-    
+
     const item = chat.type === "gift" ? "렉스" : "꿀";
     const amountText = amount + item;
 
     if (productName) {
       productName = productName.replace(amountText, "");
-      if( productName != "" ){
+      if (productName !== "") {
         productName = `, [${productName}]`;
       }
     }
@@ -75,6 +117,7 @@ async function handleCommand(chat) {
 
         if (ai) {
           await sendChat(channelId, ai);
+          await maybeSendLexTotalNotice(chat);
           return;
         }
       } catch (err) {
@@ -87,6 +130,7 @@ async function handleCommand(chat) {
       `🎁 ${nickname}님께서 ${amountText}${productName} 선물을 했습니다! 감사합니다 💖`
     );
 
+    await maybeSendLexTotalNotice(chat);
     return;
   }
 
@@ -144,7 +188,7 @@ async function handleCommand(chat) {
 
     console.log("AI 질문:", question);
 
-    if (!aiConfigStore.isEnabled(channelId)) {
+    if (!channelConfigStore.isAiEnabled(channelId)) {
       await sendChat(channelId, "🤖 현재 이 방송의 AI 기능은 OFF 상태입니다.");
       return;
     }
@@ -169,6 +213,38 @@ async function handleCommand(chat) {
 
   try {
     
+    // /* AI켜기 */
+    // if (command === "AI켜기") {
+    //   if (!utils.isManager(chat, channelId)) {
+    //     await sendChat(channelId, "명령어 추가 권한 없음");
+    //     return;
+    //   }
+
+    //   await channelConfigStore.setAiEnabled(channelId, true);
+    //   aiConfigStore.primeScope(channelId);
+    //   await sendChat(channelId, "🤖 이 방송의 AI 기능을 ON으로 설정했습니다.");
+    //   return;
+    // }
+
+    // /* AI끄기 */
+    // if (command === "AI끄기") {
+    //   if (!utils.isManager(chat, channelId)) {
+    //     await sendChat(channelId, "명령어 추가 권한 없음");
+    //     return;
+    //   }
+
+    //   await aiConfigStore.setEnabled(channelId, false);
+    //   aiConfigStore.primeScope(channelId);
+    //   await sendChat(channelId, "🙈 이 방송의 AI 기능을 OFF로 설정했습니다.");
+    //   return;
+    // }
+
+    // /* AI상태 */
+    // if (command === "AI상태") {
+    //   const status = aiConfigStore.getStatus(channelId);
+    //   await sendChat(channelId, `🤖 AI 기능 상태: ${status.enabled ? "ON" : "OFF"}`);
+    //   return;
+    // }
     /* AI켜기 */
     if (command === "AI켜기") {
       if (!utils.isManager(chat, channelId)) {
@@ -176,9 +252,8 @@ async function handleCommand(chat) {
         return;
       }
 
-      await aiConfigStore.setEnabled(channelId, true);
-      aiConfigStore.primeScope(channelId);
-      await sendChat(channelId, "🤖 이 방송의 AI 기능을 ON으로 설정했습니다.");
+      await channelConfigStore.setAiEnabled(channelId, true);
+      await sendChat(channelId, "🤖 AI 기능이 켜졌어요.");
       return;
     }
 
@@ -189,16 +264,38 @@ async function handleCommand(chat) {
         return;
       }
 
-      await aiConfigStore.setEnabled(channelId, false);
-      aiConfigStore.primeScope(channelId);
-      await sendChat(channelId, "🙈 이 방송의 AI 기능을 OFF로 설정했습니다.");
+      await channelConfigStore.setAiEnabled(channelId, false);
+      await sendChat(channelId, "🙈 AI 기능이 꺼졌어요.");
       return;
     }
 
-    /* AI상태 */
-    if (command === "AI상태") {
-      const status = aiConfigStore.getStatus(channelId);
-      await sendChat(channelId, `🤖 AI 기능 상태: ${status.enabled ? "ON" : "OFF"}`);
+    /* 렉스후원메세지 켜기 */
+    if (command === "렉스후원메세지켜기") {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      await channelConfigStore.setLexNoticeEnabled(channelId, true);
+      await sendChat(channelId, "💰 렉스후원메세지 기능이 켜졌어요.");
+      return;
+    }
+
+    /* 렉스후원메세지 끄기 */
+    if (command === "렉스후원메세지끄기") {
+      if (!utils.isManager(chat, channelId)) {
+        await sendChat(channelId, "명령어 추가 권한 없음");
+        return;
+      }
+
+      await channelConfigStore.setLexNoticeEnabled(channelId, false);
+      await sendChat(channelId, "💰 렉스후원메세지 기능이 꺼졌어요.");
+      return;
+    }
+
+    /* 환경설정 / 설정상태 / AI상태 */
+    if (command === "환경설정" || command === "설정상태" ) {
+      await sendChat(channelId, buildChannelSettingStatusMessage(channelId));
       return;
     }
 
@@ -267,36 +364,6 @@ async function handleCommand(chat) {
       return;
     }
 
-    // /* 공지목록 */
-    // if (command.startsWith("공지목록")) {
-    //   const rows = noticeStore.listNotices(channelId);
-    //   const parts = command.split(/\s+/).filter(Boolean);
-    //   const slot = parts.length >= 2 ? Number(parts[1]) : null;
-
-    //   if (!rows.length) {
-    //     await sendChat(channelId, "등록된 공지가 없습니다.");
-    //     return;
-    //   }
-
-    //   if (slot) {
-    //     const item = rows.find((row) => row.slot === slot);
-
-    //     if (!item) {
-    //       await sendChat(channelId, `공지 ${slot}번은 비어 있습니다.`);
-    //       return;
-    //     }
-
-    //     await sendChat(channelId, `📋 공지 ${item.slot}번: ${item.minute}분 / ${item.title} / ${item.message}`);
-    //     return;
-    //   }
-
-    //   const text = rows
-    //     .map((row) => `${row.slot}. ${row.minute}분 / ${row.title} / ${row.message}`)
-    //     .join(" | ");
-
-    //   await sendChat(channelId, `📋 공지목록: ${text}`);
-    //   return;
-    // }
     /* 공지목록 */
     else if (command.startsWith("공지목록")) {
       const parts = command.split(" ").filter(Boolean);
@@ -428,39 +495,6 @@ async function handleCommand(chat) {
       return;
     }
 
-    /* 댄스관리 */
-    // else if (command.startsWith("댄스관리 ")) {
-    //   if (utils.isManager(chat, channelId)) {
-    //     const parts = command.split(/\s+/);
-
-    //     if (parts.length < 3) {
-    //       await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
-    //       return;
-    //     }
-
-    //     const slot = Number(parts[1]);
-    //     const messageText = parts.slice(2).join(" ").trim();
-
-    //     if (!Number.isInteger(slot) || slot < 1 || slot > 10) {
-    //       await sendChat(channelId, "댄스 슬롯은 1~10만 가능합니다.");
-    //       return;
-    //     }
-
-    //     if (!messageText) {
-    //       await sendChat(channelId, `사용법: ${startStr}댄스관리 1 💃`);
-    //       return;
-    //     }
-
-    //     await danceStore.setMessage(channelId, slot, messageText);
-    //     danceStore.primeScope(channelId);
-    //     await sendChat(channelId, `✅ 채널 댄스 루틴 등록: ${slot}번`);
-    //   } else {
-    //     await sendChat(channelId, "명령어 추가 권한 없음");
-    //   }
-
-    //   return;
-    // }
-
     else if (command.startsWith("댄스관리 ")) {
       if (utils.isManager(chat, channelId)) {
         const match = command.match(/^댄스관리\s+(\d+)\s+([\s\S]+)$/);
@@ -569,24 +603,6 @@ async function handleCommand(chat) {
       return;
     }
 
-    /* 댄스목록 */
-    // else if (command === "댄스목록") {
-    //   const routine = danceStore.getMergedRoutine(channelId);
-
-    //   if (!routine.length) {
-    //     await sendChat(channelId, "등록된 댄스 루틴이 없습니다.");
-    //     return;
-    //   }
-
-    //   const msg = ["💃 현재 댄스 루틴"];
-
-    //   routine.forEach(row => {
-    //     msg.push(`${row.slot}. ${row.message}`);
-    //   });
-
-    //   await sendChat(channelId, msg.join("\n"));
-    //   return;
-    // }
     else if (command === "댄스목록") {
       const routine = danceStore.getMergedRoutine(channelId);
 

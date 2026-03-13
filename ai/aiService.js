@@ -4,12 +4,13 @@ const { buildCommandContext } = require("./commandContext");
 const streamStore = require("../store/streamStore");
 const viewerStore = require("../store/viewerStore");
 const chatMemory = require("../store/chatMemoryStore");
-const aiConfigStore = require("../store/aiConfigStore");
+//const aiConfigStore = require("../store/aiConfigStore");
+const channelConfigStore = require("../store/channelConfigStore");
 
 async function askAI(message, nickname, channelId, userId, type="chat") {
 
   try {
-    if (!aiConfigStore.isEnabled(channelId)) {
+    if (!channelConfigStore.isAiEnabled(channelId)) {
       return null;
     }
     const viewers = viewerStore.get(channelId) || [];
@@ -162,7 +163,7 @@ ${commandText}
 
 async function askMilestoneComment(nickname, milestone, channelId) {
   try {
-    if (!aiConfigStore.isEnabled(channelId)) {
+    if (!channelConfigStore.isAiEnabled(channelId)) {
       return null;
     }
 
@@ -180,8 +181,8 @@ async function askMilestoneComment(nickname, milestone, channelId) {
 - 특정 시청자의 채팅 달성에 대해 짧은 감상평을 남긴다.
 - 축하 멘트보다는 "감상평", "한줄 코멘트" 느낌으로 말한다.
 - 방송 채팅처럼 자연스럽고 짧게 말한다.
-- 반드시 ${milestone} 이라는 숫자를 답변에 그대로 포함해야 한다.
-- 답변에 숫자 ${milestone}이 없으면 실패다.
+- 반드시 ${nickname}, ${milestone} 이라는 숫자를 답변에 그대로 포함해야 한다.
+- 답변에 ${nickname}, 숫자 ${milestone}이 없으면 실패다.
 
 # 스타일
 - 최대 1문장
@@ -193,7 +194,7 @@ async function askMilestoneComment(nickname, milestone, channelId) {
 `;
 
     //const userPrompt = `${nickname}님이 ${milestone}채팅을 달성했다. 방송 채팅처럼 짧은 감상평 한 줄만 말해줘.`;
-    const userPrompt = `${nickname}님이 ${milestone}채팅을 달성했다. 반드시 ${milestone} 숫자를 그대로 넣어서 방송 채팅처럼 짧은 감상평 한 줄만 말해줘.`;
+    const userPrompt = `${nickname}님이 ${milestone}채팅을 달성했다. 반드시 ${nickname}, ${milestone} 숫자를 그대로 넣어서 방송 채팅처럼 짧은 감상평 한 줄만 말해줘.`;
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {

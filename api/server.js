@@ -4,7 +4,7 @@ const youtubeOAuthService = require("../service/youtubeOAuthService");
 const youtubeTokenStore = require("../store/youtubeTokenStore");
 const streamStore = require("../store/streamStore");
 const sendChat = require("../chat/sendChat");
-const aiConfigStore = require("../store/aiConfigStore");
+const channelConfigStore = require("../store/channelConfigStore");
 const crypto = require("crypto");
 
 const app = express();
@@ -113,6 +113,23 @@ function requireDashboardAuthApi(req, res, next) {
   });
 }
 
+function parseEnabledValue(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  const text = String(value || "").trim().toLowerCase();
+  return text === "true" || text === "1" || text === "on";
+}
+
+function hasOwn(obj, key) {
+  return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
+}
+
 function escapeHtml(value) {
   return String(value || "")
     .replace(/&/g, "&amp;")
@@ -120,6 +137,23 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function parseEnabledValue(value) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    return value === 1;
+  }
+
+  const text = String(value || "").trim().toLowerCase();
+  return text === "true" || text === "1" || text === "on";
+}
+
+function hasOwn(obj, key) {
+  return !!obj && Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 function formatKstDateTime(dateLike) {
@@ -146,24 +180,80 @@ function formatKstDateTime(dateLike) {
 /**
  * 나중에 토글이 늘어나면 여기 배열에만 추가하면 됨
  */
-function buildChannelSettings(channelId) {
-  const aiStatus = aiConfigStore.getStatus(channelId);
+// function buildChannelSettings(channelId, overrides = {}) {
+//   const aiStatus = aiConfigStore.getStatus(channelId);
+//   const lexNoticeStatus = lexNoticeStore.getStatus(channelId);
+
+//   const aiEnabled = hasOwn(overrides, "ai_enabled")
+//     ? !!overrides.ai_enabled
+//     : aiStatus.enabled !== false;
+
+//   const lexNoticeEnabled = hasOwn(overrides, "lex_notice_enabled")
+//     ? !!overrides.lex_notice_enabled
+//     : lexNoticeStatus.enabled === true;
+
+//   return [
+//     {
+//       key: "ai_enabled",
+//       label: "AI 기능",
+//       description: "채널에서 AI 반응 기능을 켜거나 끕니다.",
+//       enabled: aiEnabled
+//     },
+//     {
+//       key: "lex_notice_enabled",
+//       label: "렉스후원메세지",
+//       description: "10개 이상 렉스 후원 시 50% 확률로 방송 누적 렉스 안내 메세지를 보냅니다. 기본값은 OFF입니다.",
+//       enabled: lexNoticeEnabled
+//     }
+//   ];
+// }
+function buildChannelSettings(channelId, overrides = {}) {
+  const status = channelConfigStore.getStatus(channelId);
+
+  const aiEnabled = hasOwn(overrides, "ai_enabled")
+    ? !!overrides.ai_enabled
+    : status.aiEnabled;
+
+  const lexNoticeEnabled = hasOwn(overrides, "lex_notice_enabled")
+    ? !!overrides.lex_notice_enabled
+    : status.lexNoticeEnabled;
 
   return [
     {
       key: "ai_enabled",
       label: "AI 기능",
       description: "채널에서 AI 반응 기능을 켜거나 끕니다.",
-      enabled: aiStatus.enabled !== false
+      enabled: aiEnabled
+    },
+    {
+      key: "lex_notice_enabled",
+      label: "렉스후원메세지",
+      description: "10개 이상 렉스 후원 시 50% 확률로 방송 누적 렉스 안내 메세지를 보냅니다. 기본값은 OFF입니다.",
+      enabled: lexNoticeEnabled
     }
   ];
 }
 
 async function updateChannelSetting(channelId, key, enabled) {
+  const nextEnabled = !!enabled;
+
   switch (String(key)) {
     case "ai_enabled":
-      await aiConfigStore.setEnabled(channelId, !!enabled);
-      return;
+      await channelConfigStore.setAiEnabled(channelId, nextEnabled);
+      return {
+        chatMessage: nextEnabled
+          ? "🤖 AI 기능이 켜졌어요."
+          : "🙈 AI 기능이 꺼졌어요."
+      };
+
+    case "lex_notice_enabled":
+      await channelConfigStore.setLexNoticeEnabled(channelId, nextEnabled);
+      return {
+        chatMessage: nextEnabled
+          ? "💰 렉스 누적 안내 기능이 켜졌어요."
+          : "💰 렉스 누적 안내 기능이 꺼졌어요."
+      };
+
     default:
       throw new Error("invalid_setting_key");
   }
@@ -400,11 +490,48 @@ app.get("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async
 });
 
 /* 채널 설정 저장 */
+// app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async (req, res) => {
+//   try {
+//     const channelId = String(req.params.channelId || "").trim();
+//     const key = String(req.body.key || "").trim();
+//     const enabled = !!req.body.enabled;
+
+//     if (!channelId) {
+//       res.status(400).send({
+//         ok: false,
+//         error: "channelId required"
+//       });
+//       return;
+//     }
+
+//     if (!key) {
+//       res.status(400).send({
+//         ok: false,
+//         error: "key required"
+//       });
+//       return;
+//     }
+
+//     await updateChannelSetting(channelId, key, enabled);
+
+//     res.send({
+//       ok: true,
+//       channelId,
+//       settings: buildChannelSettings(channelId)
+//     });
+//   } catch (err) {
+//     console.error("dashboard channel settings update error:", err);
+//     res.status(500).send({
+//       ok: false,
+//       error: err.message
+//     });
+//   }
+// });
 app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async (req, res) => {
   try {
     const channelId = String(req.params.channelId || "").trim();
     const key = String(req.body.key || "").trim();
-    const enabled = !!req.body.enabled;
+    const enabled = parseEnabledValue(req.body.enabled);
 
     if (!channelId) {
       res.status(400).send({
@@ -422,12 +549,32 @@ app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, asyn
       return;
     }
 
-    await updateChannelSetting(channelId, key, enabled);
+    // await updateChannelSetting(channelId, key, enabled);
+
+    // res.send({
+    //   ok: true,
+    //   channelId,
+    //   settings: buildChannelSettings(channelId, {
+    //     [key]: enabled
+    //   })
+    // });
+    const result = await updateChannelSetting(channelId, key, enabled);
+
+    // 설정 저장 성공 후, 채널 채팅으로도 안내
+    if (result?.chatMessage) {
+      try {
+        await sendChat(channelId, result.chatMessage);
+      } catch (err) {
+        console.error("dashboard setting chat notify error:", err.message);
+      }
+    }
 
     res.send({
       ok: true,
       channelId,
-      settings: buildChannelSettings(channelId)
+      settings: buildChannelSettings(channelId, {
+        [key]: enabled
+      })
     });
   } catch (err) {
     console.error("dashboard channel settings update error:", err);
