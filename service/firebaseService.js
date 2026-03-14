@@ -26,6 +26,7 @@ async function watchChannels(onNewChannel, onRemoveChannel) {
 
       /* 개발 */
       ids.push("2022");
+      ids.push("89558");
 
     } else {
 
@@ -35,7 +36,7 @@ async function watchChannels(onNewChannel, onRemoveChannel) {
       });
 
     }
-    
+
     /* 새 채널 */
     const newChannels = ids.filter(id => !channelCache.includes(id));
 

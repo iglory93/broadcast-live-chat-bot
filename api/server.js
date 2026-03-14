@@ -11,6 +11,10 @@ const sendChat = require("../chat/sendChat");
 const channelConfigStore = require("../store/channelConfigStore");
 const crypto = require("crypto");
 const { unsubscribe } = require("../service/subscriptionService");
+const rouletteEventStore = require("../store/rouletteEventStore");
+const rouletteService = require("../service/rouletteService");
+const rouletteSseHub = require("../service/rouletteSseHub");
+const { renderRouletteDashboardPage, renderRouletteLivePage } = require("./roulettePageRenderer");
 
 const app = express();
 app.set("trust proxy", true);
@@ -202,9 +206,62 @@ function getAuditActionLabel(action) {
       return "채널 해제";
     case "unregister_warning":
       return "채널 해제(구독해지 경고)";
+    case "roulette_create":
+      return "룰렛 생성";
+    case "roulette_refresh":
+      return "룰렛 후보 새로고침";
+    case "roulette_start":
+      return "룰렛 시작";
+    case "roulette_stop":
+      return "룰렛 정지";
+    case "roulette_redraw":
+      return "룰렛 다시뽑기";
+    case "roulette_close":
+      return "룰렛 종료";
     default:
       return String(action || "-");
   }
+}
+function readForwardedHeader(value) {
+  return String(value || "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)[0] || "";
+}
+
+function isLocalHost(host) {
+  return /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?$/i.test(String(host || ""));
+}
+
+function getPublicBaseUrl(req) {
+  const envBase = String(process.env.PUBLIC_BASE_URL || process.env.ROULETTE_PUBLIC_BASE_URL || "").trim().replace(/\/$/, "");
+
+  if (envBase) {
+    return envBase;
+  }
+
+  const forwardedProto = readForwardedHeader(req.get("x-forwarded-proto")) || req.protocol || "http";
+  const forwardedHost = readForwardedHeader(req.get("x-forwarded-host"));
+  const host = forwardedHost || String(req.get("host") || "").trim();
+
+  if (!host) {
+    throw new Error("public_base_url_required");
+  }
+
+  if (isLocalHost(host)) {
+    throw new Error("public_base_url_required");
+  }
+
+  return `${forwardedProto}://${host}`;
+}
+async function publishRouletteState(eventId) {
+  const state = await rouletteService.getPublicState(eventId);
+
+  if (state) {
+    rouletteSseHub.publish(eventId, state);
+  }
+
+  return state;
 }
 
 async function writeAdminAuditLog({
@@ -371,36 +428,7 @@ async function searchChannelsByName(keyword, limit = 10) {
 
   return Array.isArray(res.data?.data) ? res.data.data : [];
 }
-/**
- * 나중에 토글이 늘어나면 여기 배열에만 추가하면 됨
- */
-// function buildChannelSettings(channelId, overrides = {}) {
-//   const aiStatus = aiConfigStore.getStatus(channelId);
-//   const lexNoticeStatus = lexNoticeStore.getStatus(channelId);
 
-//   const aiEnabled = hasOwn(overrides, "ai_enabled")
-//     ? !!overrides.ai_enabled
-//     : aiStatus.enabled !== false;
-
-//   const lexNoticeEnabled = hasOwn(overrides, "lex_notice_enabled")
-//     ? !!overrides.lex_notice_enabled
-//     : lexNoticeStatus.enabled === true;
-
-//   return [
-//     {
-//       key: "ai_enabled",
-//       label: "AI 기능",
-//       description: "채널에서 AI 반응 기능을 켜거나 끕니다.",
-//       enabled: aiEnabled
-//     },
-//     {
-//       key: "lex_notice_enabled",
-//       label: "렉스후원메세지",
-//       description: "10개 이상 렉스 후원 시 50% 확률로 방송 누적 렉스 안내 메세지를 보냅니다. 기본값은 OFF입니다.",
-//       enabled: lexNoticeEnabled
-//     }
-//   ];
-// }
 function buildChannelSettings(channelId, overrides = {}) {
   const status = channelConfigStore.getStatus(channelId);
 
@@ -453,196 +481,6 @@ async function updateChannelSetting(channelId, key, enabled) {
   }
 }
 
-// app.get("/dashboard/channel-search", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const q = String(req.query.q || "").trim();
-//     const limit = parseLimit(req.query.limit, 10, 20);
-
-//     if (!q) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "q required"
-//       });
-//       return;
-//     }
-
-//     const items = await searchChannelsByName(q, limit);
-
-//     const results = await Promise.all(
-//       items.map(async (item) => {
-//         const channelId = normalizeChannelId(item?.id);
-
-//         let registered = false;
-
-//         if (channelId) {
-//           const doc = await db.collection("channels").doc(channelId).get();
-//           registered = doc.exists;
-//         }
-
-//         return {
-//           channelId,
-//           channelName: item?.name || "",
-//           ownerNickname: item?.owner?.nickname || "",
-//           loginId: item?.owner?.loginId || "",
-//           isInLive: !!item?.isInLive,
-//           playerCount: Number(item?.playerCount || 0),
-//           registered
-//         };
-//       })
-//     );
-
-//     res.send({
-//       ok: true,
-//       q,
-//       count: results.length,
-//       items: results
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel search error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
-
-// app.post("/dashboard/channels/register", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const channelId = normalizeChannelId(req.body.channelId);
-
-//     if (!channelId) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "channelId required"
-//       });
-//       return;
-//     }
-
-//     const ref = db.collection("channels").doc(channelId);
-//     const doc = await ref.get();
-
-//     if (!doc.exists) {
-//       await ref.set({});
-//       console.log("dashboard channel registered:", channelId);
-//     }
-
-//     res.send({
-//       ok: true,
-//       channelId,
-//       registered: true,
-//       message: doc.exists ? "already_registered" : "registered"
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel register error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
-
-// app.delete("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const channelId = normalizeChannelId(req.params.channelId);
-
-//     if (!channelId) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "channelId required"
-//       });
-//       return;
-//     }
-
-//     await db.collection("channels").doc(channelId).delete();
-
-//     console.log("dashboard channel unregistered:", channelId);
-
-//     res.send({
-//       ok: true,
-//       channelId,
-//       registered: false,
-//       message: "unregistered"
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel unregister error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
-// app.delete("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const channelId = normalizeChannelId(req.params.channelId);
-
-//     if (!channelId) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "channelId required"
-//       });
-//       return;
-//     }
-
-//     let unsubscribed = false;
-//     let unsubscribeError = null;
-
-//     try {
-//       unsubscribed = await unsubscribe(channelId);
-//     } catch (err) {
-//       unsubscribeError = err;
-//       console.error("dashboard channel unsubscribe error:", channelId, err.message);
-//     }
-
-//     await db.collection("channels").doc(channelId).delete();
-
-//     console.log("dashboard channel unregistered:", channelId, "unsubscribed:", unsubscribed);
-
-//     res.send({
-//       ok: true,
-//       channelId,
-//       registered: false,
-//       unsubscribed,
-//       message: unsubscribed
-//         ? "unregistered_and_unsubscribed"
-//         : "unregistered_but_unsubscribe_failed",
-//       warning: unsubscribeError ? unsubscribeError.message : null
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel unregister error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
-
-// app.get("/dashboard/channels/:channelId", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const channelId = normalizeChannelId(req.params.channelId);
-
-//     if (!channelId) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "channelId required"
-//       });
-//       return;
-//     }
-
-//     const doc = await db.collection("channels").doc(channelId).get();
-
-//     res.send({
-//       ok: true,
-//       channelId,
-//       registered: doc.exists
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel get error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
 async function handleChannelSearch(req, res) {
   try {
     const q = String(req.query.q || "").trim();
@@ -844,14 +682,345 @@ app.post("/sub-admin/channels/register", requireSubAdminAuthApi, handleChannelRe
 app.delete("/sub-admin/channels/:channelId", requireSubAdminAuthApi, handleChannelUnregister);
 app.get("/sub-admin/channels/:channelId", requireSubAdminAuthApi, handleChannelGet);
 
+app.get("/dashboard/roulette", requireDashboardAuth, (req, res) => {
+  res.send(renderRouletteDashboardPage({
+    operatorName: req.authSession?.operatorName || "dashboard"
+  }));
+});
+
+app.get("/dashboard/api/roulette/current", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const event = await rouletteEventStore.getCurrentEvent();
+    const data = event ? await rouletteService.getPublicState(event.id) : null;
+    res.send({ ok: true, event: data });
+  } catch (err) {
+    console.error("roulette current error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.post("/dashboard/api/roulette/create", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const current = await rouletteEventStore.getCurrentEvent();
+
+    if (current && current.status && current.status !== "closed") {
+      res.status(409).send({
+        ok: false,
+        error: "active_event_exists",
+        eventId: current.id
+      });
+      return;
+    }
+
+    const event = await rouletteService.createRouletteEvent({
+      title: req.body.title,
+      sponsorName: req.body.sponsorName,
+      prizeText: req.body.prizeText,
+      createdBy: req.authSession?.operatorName || req.authSession?.role || "dashboard"
+    });
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_create",
+      note: `eventId=${event.id}, candidates=${Number(event.candidateCount || event.candidates?.length || 0)}`
+    });
+
+    const state = await publishRouletteState(event.id);
+
+    res.send({
+      ok: true,
+      event: state || event
+    });
+  } catch (err) {
+    console.error("roulette create error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.post("/dashboard/api/roulette/:eventId/start", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    console.log("[roulette] POST /dashboard/api/roulette/:eventId/start", { eventId });
+    const updated = await rouletteService.startEvent(eventId);
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_start",
+      note: `eventId=${eventId}`
+    });
+
+    const state = await publishRouletteState(eventId);
+
+    res.send({
+      ok: true,
+      event: state || updated
+    });
+  } catch (err) {
+    console.error("roulette start error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+app.post("/dashboard/api/roulette/:eventId/stop", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    console.log("[roulette] POST /dashboard/api/roulette/:eventId/stop", { eventId });
+    const updated = await rouletteService.stopEvent(eventId);
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_stop",
+      note: `eventId=${eventId}, winner=${updated?.winnerNickname || updated?.winnerChannelId || "-"}`
+    });
+
+    const state = await publishRouletteState(eventId);
+
+    setTimeout(() => {
+      publishRouletteState(eventId).catch((err) => {
+        console.error("roulette finish publish error:", err);
+      });
+    }, Number(updated?.stopDurationMs || 6500) + 120);
+
+    res.send({
+      ok: true,
+      event: state || updated
+    });
+  } catch (err) {
+    console.error("roulette stop error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+app.get("/dashboard/api/roulette/:eventId/share", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    const event = await rouletteEventStore.getEventById(eventId);
+
+    if (!event) {
+      res.status(404).send({ ok: false, error: "event_not_found" });
+      return;
+    }
+
+    const baseUrl = getPublicBaseUrl(req);
+    const token = String(event.shareToken || "");
+    const url = `${baseUrl}/roulette/live/${encodeURIComponent(eventId)}?token=${encodeURIComponent(token)}`;
+
+    res.send({
+      ok: true,
+      eventId,
+      token,
+      url
+    });
+  } catch (err) {
+    console.error("roulette share error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.post("/dashboard/api/roulette/:eventId/close", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    const updated = await rouletteService.closeEvent(eventId);
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_close",
+      note: `eventId=${eventId}`
+    });
+
+    const state = await publishRouletteState(eventId);
+
+    res.send({
+      ok: true,
+      event: state || updated
+    });
+  } catch (err) {
+    console.error("roulette close error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.post("/dashboard/api/roulette/:eventId/redraw", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    const updated = await rouletteService.redrawEvent(eventId);
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_redraw",
+      note: `eventId=${eventId}, winner=${updated?.winnerNickname || updated?.winnerChannelId || "-"}`
+    });
+
+    const state = await publishRouletteState(eventId);
+
+    res.send({
+      ok: true,
+      event: state || updated
+    });
+  } catch (err) {
+    console.error("roulette redraw error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.post("/dashboard/api/roulette/:eventId/refresh-candidates", requireDashboardAuthApi, async (req, res) => {
+  try {
+    const eventId = String(req.params.eventId || "").trim();
+
+    if (!eventId) {
+      res.status(400).send({ ok: false, error: "eventId required" });
+      return;
+    }
+
+    const updated = await rouletteService.refreshCandidates(eventId);
+
+    await writeAdminAuditLog({
+      req,
+      actorRole: req.authSession?.role,
+      operatorName: req.authSession?.operatorName,
+      action: "roulette_refresh",
+      note: `eventId=${eventId}, candidates=${Number(updated?.candidateCount || 0)}`
+    });
+
+    const state = await publishRouletteState(eventId);
+
+    res.send({
+      ok: true,
+      event: state || updated
+    });
+  } catch (err) {
+    console.error("roulette refresh error:", err);
+    res.status(500).send({ ok: false, error: err.message });
+  }
+});
+
+app.get("/roulette/live/:eventId", async (req, res) => {
+  const eventId = String(req.params.eventId || "");
+  const token = String(req.query.token || "");
+
+  const event = await rouletteService.validateViewerToken(eventId, token);
+
+  if (!event) {
+    res.status(403).send("invalid token");
+    return;
+  }
+
+  res.send(renderRouletteLivePage({ eventId, token }));
+});
+
+app.get("/api/public/roulette/:eventId", async (req, res) => {
+  const eventId = String(req.params.eventId || "");
+  const token = String(req.query.token || "");
+
+  const event = await rouletteService.validateViewerToken(eventId, token);
+
+  if (!event) {
+    res.status(403).send({ ok: false, error: "forbidden" });
+    return;
+  }
+
+  const state = await rouletteService.getPublicState(eventId);
+
+  res.send({
+    ok: true,
+    event: state
+  });
+});
+
+app.get("/api/public/roulette/:eventId/stream", async (req, res) => {
+  const eventId = String(req.params.eventId || "");
+  const token = String(req.query.token || "");
+
+  const event = await rouletteService.validateViewerToken(eventId, token);
+
+  if (!event) {
+    res.status(403).end();
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive"
+  });
+
+  res.write("retry: 3000\n\n");
+
+  const initialState = await rouletteService.getPublicState(eventId);
+  if (initialState) {
+    res.write(`event: state\ndata: ${JSON.stringify(initialState)}\n\n`);
+  }
+
+  rouletteSseHub.addClient(eventId, res);
+
+  const ping = setInterval(() => {
+    try {
+      res.write(": ping\n\n");
+    } catch (err) {}
+  }, 25000);
+
+  req.on("close", () => {
+    clearInterval(ping);
+    rouletteSseHub.removeClient(eventId, res);
+  });
+});
+
 app.get("/dashboard/audit-logs", requireDashboardAuthApi, async (req, res) => {
   try {
-    const limit = parseLimit(req.query.limit, 50, 200);
-    const snapshot = await db
+    const limit = parseLimit(req.query.limit, 50, 100);
+    const cursor = String(req.query.cursor || "").trim();
+
+    let query = db
       .collection("admin_audit_logs")
-      .orderBy("createdAtMs", "desc")
-      .limit(limit)
-      .get();
+      .orderBy("createdAtMs", "desc");
+
+    if (cursor) {
+      const cursorDoc = await db.collection("admin_audit_logs").doc(cursor).get();
+
+      if (cursorDoc.exists) {
+        query = query.startAfter(cursorDoc);
+      }
+    }
+
+    const snapshot = await query.limit(limit).get();
 
     const items = snapshot.docs.map((doc) => {
       const data = doc.data() || {};
@@ -861,7 +1030,7 @@ app.get("/dashboard/audit-logs", requireDashboardAuthApi, async (req, res) => {
         actorRole: data.actorRole || "dashboard",
         actorRoleLabel: getActorRoleLabel(data.actorRole),
         operatorName: data.operatorName || "",
-        actorLabel: data.operatorName || getActorRoleLabel(data.actorRole),
+        actorLabel: data.ip || data.operatorName || getActorRoleLabel(data.actorRole),
         action: data.action || "",
         actionLabel: getAuditActionLabel(data.action),
         channelId: data.channelId || "",
@@ -873,10 +1042,14 @@ app.get("/dashboard/audit-logs", requireDashboardAuthApi, async (req, res) => {
       };
     });
 
+    const lastDoc = snapshot.docs.length ? snapshot.docs[snapshot.docs.length - 1] : null;
+
     res.send({
       ok: true,
       count: items.length,
-      items
+      items,
+      nextCursor: lastDoc ? lastDoc.id : "",
+      hasMore: snapshot.docs.length === limit
     });
   } catch (err) {
     console.error("dashboard audit logs error:", err);
@@ -886,6 +1059,7 @@ app.get("/dashboard/audit-logs", requireDashboardAuthApi, async (req, res) => {
     });
   }
 });
+
 app.get("/players", (req, res) => {
   try {
     const players = streamStore.getAll();
@@ -976,116 +1150,6 @@ app.get("/health", (req, res) => {
   res.send({ status: "ok" });
 });
 
-/* dashboard login page */
-// app.get("/dashboard/login", (req, res) => {
-//   if (getDashboardAuth(req)) {
-//     res.redirect("/dashboard");
-//     return;
-//   }
-
-//   const error = String(req.query.error || "").trim();
-
-//   res.send(`
-//     <html lang="ko">
-//       <head>
-//         <meta charset="utf-8"/>
-//         <title>HARIBO Dashboard Login</title>
-//         <style>
-//           body{
-//             margin:0;
-//             background:#0f0f0f;
-//             color:#fff;
-//             font-family:Arial,sans-serif;
-//             display:flex;
-//             align-items:center;
-//             justify-content:center;
-//             min-height:100vh;
-//           }
-//           .card{
-//             width:360px;
-//             background:#171717;
-//             border:1px solid #2a2a2a;
-//             border-radius:16px;
-//             padding:28px;
-//             box-shadow:0 10px 30px rgba(0,0,0,0.35);
-//           }
-//           h1{
-//             margin:0 0 10px 0;
-//             font-size:24px;
-//           }
-//           p{
-//             color:#bbb;
-//             font-size:14px;
-//             margin:0 0 18px 0;
-//           }
-//           input{
-//             width:100%;
-//             box-sizing:border-box;
-//             padding:12px 14px;
-//             border-radius:10px;
-//             border:1px solid #333;
-//             background:#111;
-//             color:#fff;
-//             font-size:15px;
-//             margin-bottom:12px;
-//           }
-//           button{
-//             width:100%;
-//             padding:12px 14px;
-//             border:none;
-//             border-radius:10px;
-//             background:#ff4d6d;
-//             color:#fff;
-//             font-weight:bold;
-//             cursor:pointer;
-//           }
-//           .error{
-//             margin-top:12px;
-//             color:#ff8f8f;
-//             font-size:13px;
-//           }
-//         </style>
-//       </head>
-//       <body>
-//         <form class="card" method="post" action="/dashboard/login">
-//           <h1>🔐 HARIBO Dashboard</h1>
-//           <p>대시보드를 보려면 비밀번호를 입력하세요.</p>
-//           <input type="password" name="password" placeholder="비밀번호 입력" autofocus />
-//           <button type="submit">입장</button>
-//           ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
-//         </form>
-//       </body>
-//     </html>
-//   `);
-// });
-
-/* dashboard login action */
-// app.post("/dashboard/login", (req, res) => {
-//   const password = String(req.body.password || "");
-
-//   if (password !== DASHBOARD_PASSWORD) {
-//     res.redirect("/dashboard/login?error=" + encodeURIComponent("비밀번호가 올바르지 않습니다."));
-//     return;
-//   }
-
-//   const token = createDashboardSession();
-//   setDashboardCookie(res, token);
-//   res.redirect("/dashboard");
-// });
-
-/* dashboard logout */
-// app.post("/dashboard/logout", (req, res) => {
-//   const cookies = parseCookies(req);
-//   const token = cookies[DASHBOARD_COOKIE_NAME];
-
-//   if (token) {
-//     dashboardSessions.delete(token);
-//   }
-
-//   clearDashboardCookie(res);
-//   res.redirect("/dashboard/login");
-// });
-
 /* 채널 설정 조회 */
 app.get("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async (req, res) => {
   try {
@@ -1115,89 +1179,6 @@ app.get("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async
     });
   }
 });
-// function renderLoginPage({ title, description, action, error = "", accentColor = "#ff4d6d" }) {
-//   return `
-//     <html lang="ko">
-//       <head>
-//         <meta charset="utf-8"/>
-//         <title>${escapeHtml(title)}</title>
-//         <style>
-//           body{
-//             margin:0;
-//             background:#0f0f0f;
-//             color:#fff;
-//             font-family:Arial,sans-serif;
-//             display:flex;
-//             align-items:center;
-//             justify-content:center;
-//             min-height:100vh;
-//           }
-//           .card{
-//             width:360px;
-//             background:#171717;
-//             border:1px solid #2a2a2a;
-//             border-radius:16px;
-//             padding:28px;
-//             box-shadow:0 10px 30px rgba(0,0,0,0.35);
-//           }
-//           h1{
-//             margin:0 0 10px 0;
-//             font-size:24px;
-//           }
-//           p{
-//             color:#bbb;
-//             font-size:14px;
-//             margin:0 0 18px 0;
-//             line-height:1.5;
-//           }
-//           input{
-//             width:100%;
-//             box-sizing:border-box;
-//             padding:12px 14px;
-//             border-radius:10px;
-//             border:1px solid #333;
-//             background:#111;
-//             color:#fff;
-//             font-size:15px;
-//             margin-bottom:12px;
-//           }
-//           button{
-//             width:100%;
-//             padding:12px 14px;
-//             border:none;
-//             border-radius:10px;
-//             background:${accentColor};
-//             color:#fff;
-//             font-weight:bold;
-//             cursor:pointer;
-//           }
-//           .hint{
-//             margin-top:-2px;
-//             margin-bottom:14px;
-//             color:#8f8f8f;
-//             font-size:12px;
-//           }
-//           .error{
-//             margin-top:12px;
-//             color:#ff8f8f;
-//             font-size:13px;
-//           }
-//         </style>
-//       </head>
-//       <body>
-//         <form class="card" method="post" action="${escapeHtml(action)}">
-//           <h1>${escapeHtml(title)}</h1>
-//           <p>${escapeHtml(description)}</p>
-//           <input type="text" name="operatorName" placeholder="작업자명 (로그 기록용)" maxlength="40" autofocus required />
-//           <div class="hint">누가 접속했고 누가 등록/해제했는지 dashboard 로그에 표시됩니다.</div>
-//           <input type="password" name="password" placeholder="비밀번호 입력" required />
-//           <button type="submit">입장</button>
-//           ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
-//         </form>
-//       </body>
-//     </html>
-//   `;
-// }
 
 function renderLoginPage({ title, description, action, error = "", accentColor = "#ff4d6d" }) {
   return `
@@ -1274,6 +1255,7 @@ function renderLoginPage({ title, description, action, error = "", accentColor =
           <h1>${escapeHtml(title)}</h1>
           <p>${escapeHtml(description)}</p>
           <div class="hint">접속 및 작업 이력은 IP 기준으로 dashboard 로그에 기록됩니다.</div>
+          <input type="text" name="operatorName" placeholder="작업자명" maxlength="40" required />
           <input type="password" name="password" placeholder="비밀번호 입력" autofocus required />
           <button type="submit">입장</button>
           ${error ? `<div class="error">${escapeHtml(error)}</div>` : ""}
@@ -1613,7 +1595,10 @@ function handleRoleLogin(role) {
   return async (req, res) => {
     const password = String(req.body.password || "");
     const clientIp = getClientIp(req);
-
+    const operatorName = normalizeOperatorName(
+      req.body.operatorName,
+      role === "subAdmin" ? "subAdmin" : "dashboard"
+    );
     if (password !== getPasswordByRole(role)) {
       await writeAdminAuditLog({
         req,
@@ -1634,7 +1619,7 @@ function handleRoleLogin(role) {
 
     const token = createAuthSession({
       role,
-      operatorName: "",
+      operatorName,
       ip: clientIp,
       userAgent: String(req.headers["user-agent"] || "")
     });
@@ -1725,44 +1710,8 @@ app.get("/sub-admin", requireSubAdminAuth, (req, res) => {
     })
   );
 });
+
 /* 채널 설정 저장 */
-// app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async (req, res) => {
-//   try {
-//     const channelId = String(req.params.channelId || "").trim();
-//     const key = String(req.body.key || "").trim();
-//     const enabled = !!req.body.enabled;
-
-//     if (!channelId) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "channelId required"
-//       });
-//       return;
-//     }
-
-//     if (!key) {
-//       res.status(400).send({
-//         ok: false,
-//         error: "key required"
-//       });
-//       return;
-//     }
-
-//     await updateChannelSetting(channelId, key, enabled);
-
-//     res.send({
-//       ok: true,
-//       channelId,
-//       settings: buildChannelSettings(channelId)
-//     });
-//   } catch (err) {
-//     console.error("dashboard channel settings update error:", err);
-//     res.status(500).send({
-//       ok: false,
-//       error: err.message
-//     });
-//   }
-// });
 app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, async (req, res) => {
   try {
     const channelId = String(req.params.channelId || "").trim();
@@ -1785,15 +1734,6 @@ app.post("/dashboard/channel/:channelId/settings", requireDashboardAuthApi, asyn
       return;
     }
 
-    // await updateChannelSetting(channelId, key, enabled);
-
-    // res.send({
-    //   ok: true,
-    //   channelId,
-    //   settings: buildChannelSettings(channelId, {
-    //     [key]: enabled
-    //   })
-    // });
     const result = await updateChannelSetting(channelId, key, enabled);
 
     // 설정 저장 성공 후, 채널 채팅으로도 안내
@@ -1889,1350 +1829,6 @@ app.post("/dashboard/announce", requireDashboardAuthApi, async (req, res) => {
 });
 
 /* dashboard page */
-// app.get("/dashboard", requireDashboardAuth, (req, res) => {
-//   try {
-//     const players = streamStore.getAll();
-
-//     const rows = players
-//       .map((p) => {
-//         const start = formatKstDateTime(p.startedAt);
-
-//         return `
-//           <tr class="channel-row" data-channel-id="${escapeHtml(p.channelId)}" data-owner-nickname="${escapeHtml(
-//             p.ownerNickname || "-"
-//           )}">
-//             <td>${escapeHtml(p.channelId)}</td>
-//             <td>${escapeHtml(p.ownerNickname || "-")}</td>
-//             <td>${escapeHtml(p.title || "-")}</td>
-//             <td>${escapeHtml(p.streamId || "-")}</td>
-//             <td>${escapeHtml(start)}</td>
-//           </tr>
-//         `;
-//       })
-//       .join("");
-
-//     res.send(`
-//       <html lang="ko">
-//       <head>
-//         <meta charset="utf-8"/>
-//         <title>HARIBO BOT Dashboard</title>
-
-//         <style>
-//           body{
-//             background:#0f0f0f;
-//             color:#fff;
-//             font-family:Arial, sans-serif;
-//             padding:30px;
-//           }
-
-//           h1{
-//             margin:0;
-//           }
-
-//           table{
-//             width:100%;
-//             border-collapse:collapse;
-//             margin-top:20px;
-//           }
-
-//           th,td{
-//             border:1px solid #333;
-//             padding:10px;
-//             text-align:left;
-//             vertical-align:top;
-//           }
-
-//           th{
-//             background:#222;
-//           }
-
-//           tr:nth-child(even){
-//             background:#181818;
-//           }
-
-//           .channel-row{
-//             cursor:pointer;
-//             transition:background 0.15s ease;
-//           }
-
-//           .channel-row:hover{
-//             background:#232323 !important;
-//           }
-
-//           .channel-row.active{
-//             outline:2px solid #ff4d6d;
-//             outline-offset:-2px;
-//           }
-
-//           .count{
-//             margin-bottom:20px;
-//             font-size:18px;
-//           }
-
-//           .card{
-//             background:#171717;
-//             border:1px solid #2d2d2d;
-//             border-radius:12px;
-//             padding:20px;
-//             margin-bottom:24px;
-//           }
-
-//           .label{
-//             display:block;
-//             margin-bottom:10px;
-//             font-weight:bold;
-//           }
-
-//           textarea{
-//             width:100%;
-//             min-height:100px;
-//             border-radius:10px;
-//             border:1px solid #333;
-//             background:#111;
-//             color:#fff;
-//             padding:12px;
-//             box-sizing:border-box;
-//             resize:vertical;
-//           }
-
-//           button{
-//             margin-top:12px;
-//             background:#ff4d6d;
-//             color:#fff;
-//             border:none;
-//             border-radius:10px;
-//             padding:12px 18px;
-//             cursor:pointer;
-//             font-weight:bold;
-//           }
-
-//           button:disabled{
-//             opacity:0.6;
-//             cursor:not-allowed;
-//           }
-
-//           .result{
-//             margin-top:12px;
-//             font-size:14px;
-//             color:#cfcfcf;
-//             white-space:pre-wrap;
-//           }
-
-//           .hint{
-//             font-size:13px;
-//             color:#aaa;
-//             margin-top:8px;
-//           }
-
-//           .topbar{
-//             display:flex;
-//             align-items:center;
-//             justify-content:space-between;
-//             gap:16px;
-//             margin-bottom:20px;
-//           }
-
-//           .sub{
-//             color:#aaa;
-//             font-size:13px;
-//             margin-top:6px;
-//           }
-
-//           .logout-form{
-//             margin:0;
-//           }
-
-//           .logout-btn{
-//             background:#2a2a2a;
-//             margin-top:0;
-//           }
-
-//           .layout{
-//             display:grid;
-//             grid-template-columns:minmax(0, 1.6fr) minmax(320px, 0.9fr);
-//             gap:24px;
-//             align-items:start;
-//           }
-
-//           .settings-panel{
-//             position:sticky;
-//             top:20px;
-//           }
-
-//           .settings-empty{
-//             color:#aaa;
-//             font-size:14px;
-//             line-height:1.6;
-//           }
-
-//           .settings-title{
-//             font-size:20px;
-//             font-weight:bold;
-//             margin-bottom:6px;
-//           }
-
-//           .settings-sub{
-//             color:#aaa;
-//             font-size:13px;
-//             margin-bottom:18px;
-//           }
-
-//           .setting-item{
-//             display:flex;
-//             align-items:flex-start;
-//             justify-content:space-between;
-//             gap:16px;
-//             padding:14px 0;
-//             border-top:1px solid #2a2a2a;
-//           }
-
-//           .setting-item:first-child{
-//             border-top:none;
-//             padding-top:0;
-//           }
-
-//           .setting-name{
-//             font-weight:bold;
-//             margin-bottom:6px;
-//           }
-
-//           .setting-desc{
-//             color:#aaa;
-//             font-size:13px;
-//             line-height:1.5;
-//           }
-
-//           .switch{
-//             position:relative;
-//             width:52px;
-//             height:30px;
-//             flex:0 0 auto;
-//           }
-
-//           .switch input{
-//             opacity:0;
-//             width:0;
-//             height:0;
-//             position:absolute;
-//           }
-
-//           .slider{
-//             position:absolute;
-//             inset:0;
-//             border-radius:999px;
-//             background:#444;
-//             transition:0.2s ease;
-//             cursor:pointer;
-//           }
-
-//           .slider:before{
-//             content:"";
-//             position:absolute;
-//             width:22px;
-//             height:22px;
-//             left:4px;
-//             top:4px;
-//             background:#fff;
-//             border-radius:50%;
-//             transition:0.2s ease;
-//           }
-
-//           .switch input:checked + .slider{
-//             background:#ff4d6d;
-//           }
-
-//           .switch input:checked + .slider:before{
-//             transform:translateX(22px);
-//           }
-
-//           .setting-state{
-//             margin-top:8px;
-//             font-size:12px;
-//             color:#9f9f9f;
-//           }
-
-//           @media (max-width: 1100px){
-//             .layout{
-//               grid-template-columns:1fr;
-//             }
-
-//             .settings-panel{
-//               position:static;
-//             }
-//           }
-//         </style>
-
-//       </head>
-
-//       <body>
-
-//         <div class="topbar">
-//           <div>
-//             <h1>📡 HARIBO AI 방송 대시보드</h1>
-//             <div class="sub">방송 시작 일시는 한국시간(KST) 기준으로 표시됩니다.</div>
-//           </div>
-
-//           <form class="logout-form" method="post" action="/dashboard/logout">
-//             <button class="logout-btn" type="submit">로그아웃</button>
-//           </form>
-//         </div>
-
-//         <div class="count">
-//           현재 방송 수 : <b>${players.length}</b>
-//         </div>
-
-//         <div class="card">
-//           <label class="label" for="announceMessage">전체공지</label>
-//           <textarea id="announceMessage" placeholder="방송중인 모든 방에 보낼 공지 메세지를 입력하세요."></textarea>
-//           <div class="hint">보내기 누르면 현재 방송중인 모든 채널에 같은 공지가 채팅으로 전송됩니다.</div>
-//           <button id="announceBtn" type="button">공지 보내기</button>
-//           <div id="announceResult" class="result"></div>
-//         </div>
-
-//         <div class="layout">
-//           <div class="card">
-//             <div class="label">방송중 채널 목록</div>
-
-//             <table>
-//               <tr>
-//                 <th>채널</th>
-//                 <th>BJ</th>
-//                 <th>방송 제목</th>
-//                 <th>StreamId</th>
-//                 <th>방송 시작 일시 (KST)</th>
-//               </tr>
-
-//               ${rows || `
-//                 <tr>
-//                   <td colspan="5">현재 방송중인 채널이 없습니다.</td>
-//                 </tr>
-//               `}
-//             </table>
-//           </div>
-
-//           <div class="card settings-panel">
-//             <div class="settings-title">채널 설정</div>
-//             <div class="settings-sub">채널을 클릭하면 설정 정보를 볼 수 있습니다.</div>
-//             <div id="channelSettingsBody" class="settings-empty">
-//               왼쪽 채널 목록에서 방송중인 채널을 선택해주세요.
-//             </div>
-//           </div>
-//         </div>
-
-//         <script>
-//           const btn = document.getElementById("announceBtn");
-//           const input = document.getElementById("announceMessage");
-//           const result = document.getElementById("announceResult");
-//           const settingsBody = document.getElementById("channelSettingsBody");
-//           const channelRows = Array.from(document.querySelectorAll(".channel-row"));
-
-//           function setActiveRow(channelId) {
-//             channelRows.forEach((row) => {
-//               if (row.dataset.channelId === String(channelId)) {
-//                 row.classList.add("active");
-//               } else {
-//                 row.classList.remove("active");
-//               }
-//             });
-//           }
-
-//           function renderSettings(channelId, channelName, settings) {
-//             if (!settings || !settings.length) {
-//               settingsBody.innerHTML = \`
-//                 <div class="settings-empty">표시할 설정이 없습니다.</div>
-//               \`;
-//               return;
-//             }
-
-//             const itemsHtml = settings.map((item) => {
-//               const checked = item.enabled ? "checked" : "";
-//               const stateText = item.enabled ? "현재 ON" : "현재 OFF";
-
-//               return \`
-//                 <div class="setting-item">
-//                   <div>
-//                     <div class="setting-name">\${item.label}</div>
-//                     <div class="setting-desc">\${item.description || ""}</div>
-//                     <div class="setting-state" id="state-\${item.key}">\${stateText}</div>
-//                   </div>
-
-//                   <label class="switch">
-//                     <input
-//                       type="checkbox"
-//                       data-setting-key="\${item.key}"
-//                       \${checked}
-//                     />
-//                     <span class="slider"></span>
-//                   </label>
-//                 </div>
-//               \`;
-//             }).join("");
-
-//             settingsBody.innerHTML = \`
-//               <div class="settings-title">\${channelName || channelId}</div>
-//               <div class="settings-sub">채널 ID: \${channelId}</div>
-//               <div id="settingItems">\${itemsHtml}</div>
-//               <div id="settingsResult" class="result"></div>
-//             \`;
-
-//             const checkboxes = settingsBody.querySelectorAll("input[type='checkbox'][data-setting-key]");
-
-//             checkboxes.forEach((checkbox) => {
-//               checkbox.addEventListener("change", async (e) => {
-//                 const key = e.target.dataset.settingKey;
-//                 const enabled = e.target.checked;
-//                 const stateEl = document.getElementById("state-" + key);
-//                 const resultEl = document.getElementById("settingsResult");
-
-//                 e.target.disabled = true;
-//                 resultEl.textContent = "저장 중...";
-
-//                 try {
-//                   const res = await fetch("/dashboard/channel/" + encodeURIComponent(channelId) + "/settings", {
-//                     method: "POST",
-//                     headers: {
-//                       "Content-Type": "application/json"
-//                     },
-//                     body: JSON.stringify({
-//                       key,
-//                       enabled
-//                     })
-//                   });
-
-//                   const data = await res.json();
-
-//                   if (res.status === 401) {
-//                     location.href = "/dashboard/login";
-//                     return;
-//                   }
-
-//                   if (!res.ok || !data.ok) {
-//                     throw new Error(data.error || "save failed");
-//                   }
-
-//                   const saved = (data.settings || []).find((item) => item.key === key);
-//                   const finalEnabled = saved ? !!saved.enabled : enabled;
-
-//                   e.target.checked = finalEnabled;
-
-//                   if (stateEl) {
-//                     stateEl.textContent = finalEnabled ? "현재 ON" : "현재 OFF";
-//                   }
-
-//                   resultEl.textContent = "저장되었습니다.";
-//                 } catch (err) {
-//                   e.target.checked = !enabled;
-
-//                   if (stateEl) {
-//                     stateEl.textContent = !enabled ? "현재 ON" : "현재 OFF";
-//                   }
-
-//                   resultEl.textContent = "저장 실패: " + err.message;
-//                 } finally {
-//                   e.target.disabled = false;
-//                 }
-//               });
-//             });
-//           }
-
-//           async function loadChannelSettings(channelId, ownerNickname) {
-//             setActiveRow(channelId);
-
-//             settingsBody.innerHTML = "불러오는 중...";
-
-//             try {
-//               const res = await fetch("/dashboard/channel/" + encodeURIComponent(channelId) + "/settings");
-
-//               const data = await res.json();
-
-//               if (res.status === 401) {
-//                 location.href = "/dashboard/login";
-//                 return;
-//               }
-
-//               if (!res.ok || !data.ok) {
-//                 throw new Error(data.error || "load failed");
-//               }
-
-//               renderSettings(channelId, ownerNickname || data.channelName || channelId, data.settings || []);
-//             } catch (err) {
-//               settingsBody.innerHTML = '<div class="settings-empty">설정 불러오기 실패: ' + err.message + '</div>';
-//             }
-//           }
-
-//           channelRows.forEach((row) => {
-//             row.addEventListener("click", () => {
-//               loadChannelSettings(row.dataset.channelId, row.dataset.ownerNickname);
-//             });
-//           });
-
-//           btn.addEventListener("click", async () => {
-//             const message = input.value.trim();
-
-//             if (!message) {
-//               result.textContent = "메세지를 입력해주세요.";
-//               return;
-//             }
-
-//             btn.disabled = true;
-//             result.textContent = "전송 중...";
-
-//             try {
-//               const res = await fetch("/dashboard/announce", {
-//                 method: "POST",
-//                 headers: {
-//                   "Content-Type": "application/json"
-//                 },
-//                 body: JSON.stringify({ message })
-//               });
-
-//               const data = await res.json();
-
-//               if (res.status === 401) {
-//                 location.href = "/dashboard/login";
-//                 return;
-//               }
-
-//               if (!res.ok || !data.ok) {
-//                 result.textContent = "전송 실패: " + (data.error || "unknown error");
-//                 return;
-//               }
-
-//               result.textContent =
-//                 "전송 완료\\n" +
-//                 "- 전체 채널: " + data.total + "\\n" +
-//                 "- 성공: " + data.success + "\\n" +
-//                 "- 실패: " + data.failed;
-
-//               input.value = "";
-//             } catch (err) {
-//               result.textContent = "전송 실패: " + err.message;
-//             } finally {
-//               btn.disabled = false;
-//             }
-//           });
-//         </script>
-
-//       </body>
-//       </html>
-//     `);
-//   } catch (err) {
-//     console.error("dashboard error:", err);
-//     res.status(500).send("dashboard error");
-//   }
-// });
-
-// app.get("/dashboard", requireDashboardAuth, (req, res) => {
-//   try {
-//     const players = streamStore.getAll();
-
-//     const rows = players
-//       .map((p) => {
-//         const start = formatKstDateTime(p.startedAt);
-
-//         return `
-//           <tr class="channel-row" data-channel-id="${escapeHtml(p.channelId)}" data-owner-nickname="${escapeHtml(
-//             p.ownerNickname || "-"
-//           )}">
-//             <td>${escapeHtml(p.channelId)}</td>
-//             <td>${escapeHtml(p.ownerNickname || "-")}</td>
-//             <td>${escapeHtml(p.title || "-")}</td>
-//             <td>${escapeHtml(p.streamId || "-")}</td>
-//             <td>${escapeHtml(start)}</td>
-//           </tr>
-//         `;
-//       })
-//       .join("");
-
-//     res.send(`
-//       <html lang="ko">
-//       <head>
-//         <meta charset="utf-8"/>
-//         <title>HARIBO BOT Dashboard</title>
-
-//         <style>
-//           body{
-//             background:#0f0f0f;
-//             color:#fff;
-//             font-family:Arial, sans-serif;
-//             padding:30px;
-//           }
-
-//           h1{
-//             margin:0;
-//           }
-
-//           table{
-//             width:100%;
-//             border-collapse:collapse;
-//             margin-top:20px;
-//           }
-
-//           th,td{
-//             border:1px solid #333;
-//             padding:10px;
-//             text-align:left;
-//             vertical-align:top;
-//           }
-
-//           th{
-//             background:#222;
-//           }
-
-//           tr:nth-child(even){
-//             background:#181818;
-//           }
-
-//           .channel-row{
-//             cursor:pointer;
-//             transition:background 0.15s ease;
-//           }
-
-//           .channel-row:hover{
-//             background:#232323 !important;
-//           }
-
-//           .channel-row.active{
-//             outline:2px solid #ff4d6d;
-//             outline-offset:-2px;
-//           }
-
-//           .count{
-//             margin-bottom:20px;
-//             font-size:18px;
-//           }
-
-//           .card{
-//             background:#171717;
-//             border:1px solid #2d2d2d;
-//             border-radius:12px;
-//             padding:20px;
-//             margin-bottom:24px;
-//           }
-
-//           .label{
-//             display:block;
-//             margin-bottom:10px;
-//             font-weight:bold;
-//           }
-
-//           textarea{
-//             width:100%;
-//             min-height:100px;
-//             border-radius:10px;
-//             border:1px solid #333;
-//             background:#111;
-//             color:#fff;
-//             padding:12px;
-//             box-sizing:border-box;
-//             resize:vertical;
-//           }
-
-//           button{
-//             margin-top:12px;
-//             background:#ff4d6d;
-//             color:#fff;
-//             border:none;
-//             border-radius:10px;
-//             padding:12px 18px;
-//             cursor:pointer;
-//             font-weight:bold;
-//           }
-
-//           button:disabled{
-//             opacity:0.6;
-//             cursor:not-allowed;
-//           }
-
-//           .result{
-//             margin-top:12px;
-//             font-size:14px;
-//             color:#cfcfcf;
-//             white-space:pre-wrap;
-//           }
-
-//           .hint{
-//             font-size:13px;
-//             color:#aaa;
-//             margin-top:8px;
-//           }
-
-//           .topbar{
-//             display:flex;
-//             align-items:center;
-//             justify-content:space-between;
-//             gap:16px;
-//             margin-bottom:20px;
-//           }
-
-//           .sub{
-//             color:#aaa;
-//             font-size:13px;
-//             margin-top:6px;
-//           }
-
-//           .logout-form{
-//             margin:0;
-//           }
-
-//           .logout-btn{
-//             background:#2a2a2a;
-//             margin-top:0;
-//           }
-
-//           .layout{
-//             display:grid;
-//             grid-template-columns:minmax(0, 1.6fr) minmax(320px, 0.9fr);
-//             gap:24px;
-//             align-items:start;
-//           }
-
-//           .settings-panel{
-//             position:sticky;
-//             top:20px;
-//           }
-
-//           .settings-empty{
-//             color:#aaa;
-//             font-size:14px;
-//             line-height:1.6;
-//           }
-
-//           .settings-title{
-//             font-size:20px;
-//             font-weight:bold;
-//             margin-bottom:6px;
-//           }
-
-//           .settings-sub{
-//             color:#aaa;
-//             font-size:13px;
-//             margin-bottom:18px;
-//           }
-
-//           .setting-item{
-//             display:flex;
-//             align-items:flex-start;
-//             justify-content:space-between;
-//             gap:16px;
-//             padding:14px 0;
-//             border-top:1px solid #2a2a2a;
-//           }
-
-//           .setting-item:first-child{
-//             border-top:none;
-//             padding-top:0;
-//           }
-
-//           .setting-name{
-//             font-weight:bold;
-//             margin-bottom:6px;
-//           }
-
-//           .setting-desc{
-//             color:#aaa;
-//             font-size:13px;
-//             line-height:1.5;
-//           }
-
-//           .switch{
-//             position:relative;
-//             width:52px;
-//             height:30px;
-//             flex:0 0 auto;
-//           }
-
-//           .switch input{
-//             opacity:0;
-//             width:0;
-//             height:0;
-//             position:absolute;
-//           }
-
-//           .slider{
-//             position:absolute;
-//             inset:0;
-//             border-radius:999px;
-//             background:#444;
-//             transition:0.2s ease;
-//             cursor:pointer;
-//           }
-
-//           .slider:before{
-//             content:"";
-//             position:absolute;
-//             width:22px;
-//             height:22px;
-//             left:4px;
-//             top:4px;
-//             background:#fff;
-//             border-radius:50%;
-//             transition:0.2s ease;
-//           }
-
-//           .switch input:checked + .slider{
-//             background:#ff4d6d;
-//           }
-
-//           .switch input:checked + .slider:before{
-//             transform:translateX(22px);
-//           }
-
-//           .setting-state{
-//             margin-top:8px;
-//             font-size:12px;
-//             color:#9f9f9f;
-//           }
-
-//           .search-row{
-//             display:flex;
-//             gap:10px;
-//             align-items:center;
-//             flex-wrap:wrap;
-//           }
-
-//           .search-input{
-//             flex:1 1 320px;
-//             min-width:240px;
-//             padding:12px 14px;
-//             border-radius:10px;
-//             border:1px solid #333;
-//             background:#111;
-//             color:#fff;
-//             font-size:15px;
-//             box-sizing:border-box;
-//           }
-
-//           .search-btn{
-//             margin-top:0;
-//           }
-
-//           .search-result-list{
-//             margin-top:16px;
-//             display:flex;
-//             flex-direction:column;
-//             gap:12px;
-//           }
-
-//           .search-item{
-//             border:1px solid #2e2e2e;
-//             border-radius:12px;
-//             padding:14px;
-//             background:#111;
-//           }
-
-//           .search-item-top{
-//             display:flex;
-//             align-items:flex-start;
-//             justify-content:space-between;
-//             gap:16px;
-//           }
-
-//           .search-item-title{
-//             font-size:17px;
-//             font-weight:bold;
-//             margin-bottom:6px;
-//           }
-
-//           .search-item-meta{
-//             color:#b5b5b5;
-//             font-size:13px;
-//             line-height:1.6;
-//           }
-
-//           .live-badge{
-//             display:inline-block;
-//             font-size:12px;
-//             border-radius:999px;
-//             padding:4px 8px;
-//             font-weight:bold;
-//             margin-left:8px;
-//           }
-
-//           .live-on{
-//             background:#2d7d46;
-//             color:#d9ffe4;
-//           }
-
-//           .live-off{
-//             background:#343434;
-//             color:#d6d6d6;
-//           }
-
-//           .search-item-actions{
-//             display:flex;
-//             gap:8px;
-//             flex-wrap:wrap;
-//             margin-top:12px;
-//           }
-
-//           .btn-secondary{
-//             background:#2a2a2a;
-//           }
-
-//           .btn-danger{
-//             background:#8f2d3d;
-//           }
-
-//           .search-empty{
-//             color:#aaa;
-//             font-size:14px;
-//             padding:8px 0;
-//           }
-
-//           .registered-text{
-//             color:#7ee787;
-//             font-size:12px;
-//             margin-top:6px;
-//           }
-
-//           @media (max-width: 1100px){
-//             .layout{
-//               grid-template-columns:1fr;
-//             }
-
-//             .settings-panel{
-//               position:static;
-//             }
-//           }
-//         </style>
-
-//       </head>
-
-//       <body>
-
-//         <div class="topbar">
-//           <div>
-//             <h1>📡 HARIBO AI 방송 대시보드</h1>
-//             <div class="sub">방송 시작 일시는 한국시간(KST) 기준으로 표시됩니다.</div>
-//           </div>
-
-//           <form class="logout-form" method="post" action="/dashboard/logout">
-//             <button class="logout-btn" type="submit">로그아웃</button>
-//           </form>
-//         </div>
-
-//         <div class="count">
-//           현재 방송 수 : <b>${players.length}</b>
-//         </div>
-
-//         <div class="card">
-//           <label class="label" for="channelSearchInput">채널 검색 / 등록</label>
-
-//           <div class="search-row">
-//             <input
-//               id="channelSearchInput"
-//               class="search-input"
-//               type="text"
-//               placeholder="BJ명 또는 채널명을 입력하세요. 예) 퐁이"
-//             />
-//             <button id="channelSearchBtn" class="search-btn" type="button">검색</button>
-//           </div>
-
-//           <div class="hint">
-//             검색 결과에서 등록을 누르면 Firestore channels 컬렉션에 채널 ID만 저장됩니다.
-//           </div>
-
-//           <div id="channelSearchResult" class="search-result-list">
-//             <div class="search-empty">검색어를 입력하고 검색 버튼을 눌러주세요.</div>
-//           </div>
-//         </div>
-
-//         <div class="card">
-//           <label class="label" for="announceMessage">전체공지</label>
-//           <textarea id="announceMessage" placeholder="방송중인 모든 방에 보낼 공지 메세지를 입력하세요."></textarea>
-//           <div class="hint">보내기 누르면 현재 방송중인 모든 채널에 같은 공지가 채팅으로 전송됩니다.</div>
-//           <button id="announceBtn" type="button">공지 보내기</button>
-//           <div id="announceResult" class="result"></div>
-//         </div>
-
-//         <div class="layout">
-//           <div class="card">
-//             <div class="label">방송중 채널 목록</div>
-
-//             <table>
-//               <tr>
-//                 <th>채널</th>
-//                 <th>BJ</th>
-//                 <th>방송 제목</th>
-//                 <th>StreamId</th>
-//                 <th>방송 시작 일시 (KST)</th>
-//               </tr>
-
-//               ${rows || `
-//                 <tr>
-//                   <td colspan="5">현재 방송중인 채널이 없습니다.</td>
-//                 </tr>
-//               `}
-//             </table>
-//           </div>
-
-//           <div class="card settings-panel">
-//             <div class="settings-title">채널 설정</div>
-//             <div class="settings-sub">채널을 클릭하면 설정 정보를 볼 수 있습니다.</div>
-//             <div id="channelSettingsBody" class="settings-empty">
-//               왼쪽 채널 목록에서 방송중인 채널을 선택해주세요.
-//             </div>
-//           </div>
-//         </div>
-
-//         <script>
-//           const btn = document.getElementById("announceBtn");
-//           const input = document.getElementById("announceMessage");
-//           const result = document.getElementById("announceResult");
-//           const settingsBody = document.getElementById("channelSettingsBody");
-//           const channelRows = Array.from(document.querySelectorAll(".channel-row"));
-
-//           const channelSearchInput = document.getElementById("channelSearchInput");
-//           const channelSearchBtn = document.getElementById("channelSearchBtn");
-//           const channelSearchResult = document.getElementById("channelSearchResult");
-
-//           function escapeHtmlClient(value) {
-//             return String(value || "")
-//               .replace(/&/g, "&amp;")
-//               .replace(/</g, "&lt;")
-//               .replace(/>/g, "&gt;")
-//               .replace(/"/g, "&quot;")
-//               .replace(/'/g, "&#39;");
-//           }
-
-//           function setActiveRow(channelId) {
-//             channelRows.forEach((row) => {
-//               if (row.dataset.channelId === String(channelId)) {
-//                 row.classList.add("active");
-//               } else {
-//                 row.classList.remove("active");
-//               }
-//             });
-//           }
-
-//           function renderSettings(channelId, channelName, settings) {
-//             if (!settings || !settings.length) {
-//               settingsBody.innerHTML = \`
-//                 <div class="settings-empty">표시할 설정이 없습니다.</div>
-//               \`;
-//               return;
-//             }
-
-//             const itemsHtml = settings.map((item) => {
-//               const checked = item.enabled ? "checked" : "";
-//               const stateText = item.enabled ? "현재 ON" : "현재 OFF";
-
-//               return \`
-//                 <div class="setting-item">
-//                   <div>
-//                     <div class="setting-name">\${item.label}</div>
-//                     <div class="setting-desc">\${item.description || ""}</div>
-//                     <div class="setting-state" id="state-\${item.key}">\${stateText}</div>
-//                   </div>
-
-//                   <label class="switch">
-//                     <input
-//                       type="checkbox"
-//                       data-setting-key="\${item.key}"
-//                       \${checked}
-//                     />
-//                     <span class="slider"></span>
-//                   </label>
-//                 </div>
-//               \`;
-//             }).join("");
-
-//             settingsBody.innerHTML = \`
-//               <div class="settings-title">\${channelName || channelId}</div>
-//               <div class="settings-sub">채널 ID: \${channelId}</div>
-//               <div id="settingItems">\${itemsHtml}</div>
-//               <div id="settingsResult" class="result"></div>
-//             \`;
-
-//             const checkboxes = settingsBody.querySelectorAll("input[type='checkbox'][data-setting-key]");
-
-//             checkboxes.forEach((checkbox) => {
-//               checkbox.addEventListener("change", async (e) => {
-//                 const key = e.target.dataset.settingKey;
-//                 const enabled = e.target.checked;
-//                 const stateEl = document.getElementById("state-" + key);
-//                 const resultEl = document.getElementById("settingsResult");
-
-//                 e.target.disabled = true;
-//                 resultEl.textContent = "저장 중...";
-
-//                 try {
-//                   const res = await fetch("/dashboard/channel/" + encodeURIComponent(channelId) + "/settings", {
-//                     method: "POST",
-//                     headers: {
-//                       "Content-Type": "application/json"
-//                     },
-//                     body: JSON.stringify({
-//                       key,
-//                       enabled
-//                     })
-//                   });
-
-//                   const data = await res.json();
-
-//                   if (res.status === 401) {
-//                     location.href = "/dashboard/login";
-//                     return;
-//                   }
-
-//                   if (!res.ok || !data.ok) {
-//                     throw new Error(data.error || "save failed");
-//                   }
-
-//                   const saved = (data.settings || []).find((item) => item.key === key);
-//                   const finalEnabled = saved ? !!saved.enabled : enabled;
-
-//                   e.target.checked = finalEnabled;
-
-//                   if (stateEl) {
-//                     stateEl.textContent = finalEnabled ? "현재 ON" : "현재 OFF";
-//                   }
-
-//                   resultEl.textContent = "저장되었습니다.";
-//                 } catch (err) {
-//                   e.target.checked = !enabled;
-
-//                   if (stateEl) {
-//                     stateEl.textContent = !enabled ? "현재 ON" : "현재 OFF";
-//                   }
-
-//                   resultEl.textContent = "저장 실패: " + err.message;
-//                 } finally {
-//                   e.target.disabled = false;
-//                 }
-//               });
-//             });
-//           }
-
-//           async function loadChannelSettings(channelId, ownerNickname) {
-//             setActiveRow(channelId);
-
-//             settingsBody.innerHTML = "불러오는 중...";
-
-//             try {
-//               const res = await fetch("/dashboard/channel/" + encodeURIComponent(channelId) + "/settings");
-//               const data = await res.json();
-
-//               if (res.status === 401) {
-//                 location.href = "/dashboard/login";
-//                 return;
-//               }
-
-//               if (!res.ok || !data.ok) {
-//                 throw new Error(data.error || "load failed");
-//               }
-
-//               renderSettings(channelId, ownerNickname || data.channelName || channelId, data.settings || []);
-//             } catch (err) {
-//               settingsBody.innerHTML = '<div class="settings-empty">설정 불러오기 실패: ' + err.message + '</div>';
-//             }
-//           }
-
-//           channelRows.forEach((row) => {
-//             row.addEventListener("click", () => {
-//               loadChannelSettings(row.dataset.channelId, row.dataset.ownerNickname);
-//             });
-//           });
-
-//           function buildSearchItemHtml(item) {
-//             const liveClass = item.isInLive ? "live-on" : "live-off";
-//             const liveText = item.isInLive ? "LIVE" : "OFF";
-//             const actionButton = item.registered
-//               ? \`<button class="btn-danger" type="button" data-action="unregister" data-channel-id="\${escapeHtmlClient(item.channelId)}">해제</button>\`
-//               : \`<button type="button" data-action="register" data-channel-id="\${escapeHtmlClient(item.channelId)}">등록</button>\`;
-
-//             const registeredText = item.registered
-//               ? '<div class="registered-text">현재 channels 컬렉션에 등록됨</div>'
-//               : '';
-
-//             return \`
-//               <div class="search-item">
-//                 <div class="search-item-top">
-//                   <div>
-//                     <div class="search-item-title">
-//                       \${escapeHtmlClient(item.channelName || "-")}
-//                       <span class="live-badge \${liveClass}">\${liveText}</span>
-//                     </div>
-//                     <div class="search-item-meta">
-//                       채널 ID: \${escapeHtmlClient(item.channelId || "-")}<br/>
-//                       BJ: \${escapeHtmlClient(item.ownerNickname || "-")}<br/>
-//                       로그인 ID: \${escapeHtmlClient(item.loginId || "-")}<br/>
-//                       시청자 수: \${Number(item.playerCount || 0)}
-//                     </div>
-//                     \${registeredText}
-//                   </div>
-//                 </div>
-
-//                 <div class="search-item-actions">
-//                   \${actionButton}
-//                 </div>
-//               </div>
-//             \`;
-//           }
-
-//           function bindSearchActionButtons() {
-//             const buttons = channelSearchResult.querySelectorAll("button[data-action][data-channel-id]");
-
-//             buttons.forEach((button) => {
-//               button.addEventListener("click", async () => {
-//                 const action = button.dataset.action;
-//                 const channelId = String(button.dataset.channelId || "");
-
-//                 if (!channelId) {
-//                   return;
-//                 }
-
-//                 button.disabled = true;
-//                 button.textContent = action === "register" ? "등록 중..." : "해제 중...";
-
-//                 try {
-//                   let res;
-
-//                   if (action === "register") {
-//                     res = await fetch("/dashboard/channels/register", {
-//                       method: "POST",
-//                       headers: {
-//                         "Content-Type": "application/json"
-//                       },
-//                       body: JSON.stringify({ channelId })
-//                     });
-//                   } else {
-//                     res = await fetch("/dashboard/channels/" + encodeURIComponent(channelId), {
-//                       method: "DELETE"
-//                     });
-//                   }
-
-//                   const data = await res.json();
-
-//                   if (res.status === 401) {
-//                     location.href = "/dashboard/login";
-//                     return;
-//                   }
-
-//                   if (!res.ok || !data.ok) {
-//                     throw new Error(data.error || "request failed");
-//                   }
-
-//                   await performChannelSearch(false);
-//                 } catch (err) {
-//                   alert((action === "register" ? "등록 실패: " : "해제 실패: ") + err.message);
-//                 } finally {
-//                   button.disabled = false;
-//                 }
-//               });
-//             });
-//           }
-
-//           async function performChannelSearch(focusKeep = true) {
-//             const q = channelSearchInput.value.trim();
-
-//             if (!q) {
-//               channelSearchResult.innerHTML = '<div class="search-empty">검색어를 입력해주세요.</div>';
-//               if (focusKeep) {
-//                 channelSearchInput.focus();
-//               }
-//               return;
-//             }
-
-//             channelSearchBtn.disabled = true;
-//             channelSearchResult.innerHTML = '<div class="search-empty">검색 중...</div>';
-
-//             try {
-//               const res = await fetch("/dashboard/channel-search?q=" + encodeURIComponent(q));
-//               const data = await res.json();
-
-//               if (res.status === 401) {
-//                 location.href = "/dashboard/login";
-//                 return;
-//               }
-
-//               if (!res.ok || !data.ok) {
-//                 throw new Error(data.error || "search failed");
-//               }
-
-//               const items = Array.isArray(data.items) ? data.items : [];
-
-//               if (!items.length) {
-//                 channelSearchResult.innerHTML = '<div class="search-empty">검색 결과가 없습니다.</div>';
-//                 return;
-//               }
-
-//               channelSearchResult.innerHTML = items.map(buildSearchItemHtml).join("");
-//               bindSearchActionButtons();
-//             } catch (err) {
-//               channelSearchResult.innerHTML = '<div class="search-empty">검색 실패: ' + escapeHtmlClient(err.message) + '</div>';
-//             } finally {
-//               channelSearchBtn.disabled = false;
-//             }
-//           }
-
-//           channelSearchBtn.addEventListener("click", () => {
-//             performChannelSearch();
-//           });
-
-//           channelSearchInput.addEventListener("keydown", (e) => {
-//             if (e.key === "Enter") {
-//               e.preventDefault();
-//               performChannelSearch();
-//             }
-//           });
-
-//           btn.addEventListener("click", async () => {
-//             const message = input.value.trim();
-
-//             if (!message) {
-//               result.textContent = "메세지를 입력해주세요.";
-//               return;
-//             }
-
-//             btn.disabled = true;
-//             result.textContent = "전송 중...";
-
-//             try {
-//               const res = await fetch("/dashboard/announce", {
-//                 method: "POST",
-//                 headers: {
-//                   "Content-Type": "application/json"
-//                 },
-//                 body: JSON.stringify({ message })
-//               });
-
-//               const data = await res.json();
-
-//               if (res.status === 401) {
-//                 location.href = "/dashboard/login";
-//                 return;
-//               }
-
-//               if (!res.ok || !data.ok) {
-//                 result.textContent = "전송 실패: " + (data.error || "unknown error");
-//                 return;
-//               }
-
-//               result.textContent =
-//                 "전송 완료\\n" +
-//                 "- 전체 채널: " + data.total + "\\n" +
-//                 "- 성공: " + data.success + "\\n" +
-//                 "- 실패: " + data.failed;
-
-//               input.value = "";
-//             } catch (err) {
-//               result.textContent = "전송 실패: " + err.message;
-//             } finally {
-//               btn.disabled = false;
-//             }
-//           });
-//         </script>
-
-//       </body>
-//       </html>
-//     `);
-//   } catch (err) {
-//     console.error("dashboard error:", err);
-//     res.status(500).send("dashboard error");
-//   }
-// });
 app.get("/dashboard", requireDashboardAuth, (req, res) => {
   try {
     const players = streamStore.getAll();
@@ -3700,6 +2296,14 @@ app.get("/dashboard", requireDashboardAuth, (req, res) => {
           <div id="auditLogList" class="audit-log-list">
             <div class="search-empty">로그를 불러오는 중...</div>
           </div>
+          <button id="auditLogNextBtn" type="button" class="btn-secondary" style="display:none;">
+            다음 페이지
+          </button>
+        </div>
+        <div class="card">
+          <label class="label">이벤트 룰렛</label>
+          <div class="hint">룰렛 생성, 시작/정지, BJ 공유 링크 발급은 전용 컨트롤 페이지에서 진행합니다.</div>
+          <button type="button" onclick="location.href='/dashboard/roulette'">룰렛 컨트롤 열기</button>
         </div>
 
         <div class="card">
